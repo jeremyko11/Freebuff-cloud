@@ -1,0 +1,46 @@
+# --- Secrets / credentials ---
+.env
+.env.*
+*.env
+*credentials*
+*secret*
+auth.json
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# --- Node ---
+node_modules/
+*.log
+npm-debug.log*
+
+# --- Go ---
+*.exe
+*.test
+*.out
+
+# --- Editors / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Runtime ---
+*.pid
+*.tmp
+*.cache/
+coverage/

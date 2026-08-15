@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO: 技术栈确定后替换为实际的构建/测试步骤，例如：
+      # - uses: actions/setup-python@v5
+      #   with: { python-version: "3.12" }
+      # - run: pip install -e . && pytest tests/
+      - name: Placeholder
+        run: |
+          echo "Repo skeleton OK"
+          test -f README.md && test -f LICENSE
