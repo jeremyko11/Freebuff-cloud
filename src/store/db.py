@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+from src.smart.tagging import derive_auto_tags
+
 logger = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -19,7 +21,9 @@ CREATE TABLE IF NOT EXISTS wallets (
     score REAL,
     source TEXT,
     active INTEGER DEFAULT 1,
-    updated_at REAL
+    updated_at REAL,
+    auto_tags TEXT DEFAULT '',
+    manual_tags TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,17 +87,22 @@ class Store:
         now = time.time()
         with self._lock, self._conn:
             for w in wallets:
+                auto = ",".join(derive_auto_tags(
+                    getattr(w, "pnl", None), getattr(w, "volume", None),
+                    getattr(w, "win_rate", None), getattr(w, "profit_factor", None),
+                    getattr(w, "closed_count", None), getattr(w, "score", None)))
                 self._conn.execute(
                     """INSERT INTO wallets (address,name,pnl,volume,win_rate,profit_factor,
-                         closed_count,score,source,active,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,1,?)
+                         closed_count,score,source,active,updated_at,auto_tags)
+                       VALUES (?,?,?,?,?,?,?,?,?,1,?,?)
                        ON CONFLICT(address) DO UPDATE SET
                          name=excluded.name, pnl=excluded.pnl, volume=excluded.volume,
                          win_rate=excluded.win_rate, profit_factor=excluded.profit_factor,
                          closed_count=excluded.closed_count, score=excluded.score,
-                         source=excluded.source, active=1, updated_at=excluded.updated_at""",
+                         source=excluded.source, active=1, updated_at=excluded.updated_at,
+                         auto_tags=excluded.auto_tags""",
                     (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
-                     w.closed_count, w.score, w.source, now))
+                     w.closed_count, w.score, w.source, now, auto))
             # 不在新名单里的标 inactive
             if wallets:
                 addrs = [w.address for w in wallets]
@@ -106,6 +115,63 @@ class Store:
             rows = self._conn.execute(
                 "SELECT * FROM wallets WHERE active=1 ORDER BY score DESC").fetchall()
         return [dict(r) for r in rows]
+
+    # ---------------- tags ----------------
+
+    def add_manual_tag(self, address: str, tag: str) -> int:
+        """给钱包追加一个手动标签，返回该钱包当前手动标签数。"""
+        tag = tag.strip()
+        if not tag:
+            return 0
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT manual_tags FROM wallets WHERE address=?", (address,)).fetchone()
+            if not row:
+                return 0
+            cur = [t for t in (row["manual_tags"] or "").split(",") if t]
+            if tag not in cur:
+                cur.append(tag)
+            self._conn.execute(
+                "UPDATE wallets SET manual_tags=? WHERE address=?", (",".join(cur), address))
+            return len(cur)
+
+    def remove_manual_tag(self, address: str, tag: str) -> int:
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT manual_tags FROM wallets WHERE address=?", (address,)).fetchone()
+            if not row:
+                return 0
+            cur = [t for t in (row["manual_tags"] or "").split(",") if t and t != tag]
+            self._conn.execute(
+                "UPDATE wallets SET manual_tags=? WHERE address=?", (",".join(cur), address))
+            return len(cur)
+
+    def clear_manual_tags(self, address: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE wallets SET manual_tags='' WHERE address=?", (address,))
+
+    def get_wallet(self, address: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM wallets WHERE address=?", (address,)).fetchone()
+        return dict(row) if row else None
+
+    def wallet_tags(self, address_or_name: str) -> tuple[list[str], list[str], str | None]:
+        """按地址精确 / 名称模糊查询，返回 (auto_tags, manual_tags, address)。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT address,auto_tags,manual_tags FROM wallets WHERE address=?",
+                (address_or_name,)).fetchone()
+            if not row:
+                row = self._conn.execute(
+                    "SELECT address,auto_tags,manual_tags FROM wallets WHERE name=?",
+                    (address_or_name,)).fetchone()
+            if not row:
+                return [], [], None
+            auto = [t for t in (row["auto_tags"] or "").split(",") if t]
+            manual = [t for t in (row["manual_tags"] or "").split(",") if t]
+            return auto, manual, row["address"]
 
     # ---------------- signals ----------------
 

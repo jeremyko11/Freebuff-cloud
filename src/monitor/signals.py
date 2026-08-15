@@ -38,6 +38,7 @@ class Signal:
     tx_hashes: list = field(default_factory=list)
     ts: float = 0.0
     dedup_key: str = ""
+    tags: list = field(default_factory=list)  # 钱包标签（推送展示用）
 
 
 def _hour_bucket(ts_ms: float) -> int:

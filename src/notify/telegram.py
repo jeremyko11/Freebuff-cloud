@@ -64,6 +64,8 @@ def format_signal(s: Signal) -> str:
     emoji = _TYPE_EMOJI.get(s.type, "•")
     type_label = {"OPEN": "新开仓", "ADD": "加仓", "REDUCE": "减仓/平仓", "SWEEP": "拆单建仓"}.get(s.type, s.type)
     who = s.wallet_name or f"{s.address[:8]}…{s.address[-4:]}"
+    if getattr(s, "tags", None):
+        who = f"{who} 「{'·'.join(s.tags)}」"
     title = s.title or s.conditionId[:16]
     url = f"https://polymarket.com/event/{s.slug}" if s.slug else ""
     lines = [

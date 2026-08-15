@@ -87,8 +87,14 @@ class Watcher:
         return n_signals
 
     def _notify_signal(self, s: Signal) -> None:
-        logger.info("信号 [%s] %s %s %s $%.0f @%.3f", s.type, s.wallet_name or s.address[:10],
-                    s.side, s.outcome, s.usdc, s.price)
+        # 注入钱包标签（自动+手动）供推送展示
+        try:
+            auto, manual, _ = self.store.wallet_tags(s.address)
+            s.tags = manual + auto
+        except Exception:
+            s.tags = []
+        logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
+                    s.side, s.outcome, s.usdc, s.price, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
             send_message(self.cfg.telegram, format_signal(s))
 
