@@ -374,6 +374,47 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_backfill() -> int:
+    """给存量信号的 asset（token id）回填，供今日盈亏/验证闭环使用。"""
+    import time
+    from src.store.db import Store
+    from src.config import get_config
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    conn = store._conn
+    # distinct condition_ids missing asset
+    rows = conn.execute(
+        "SELECT DISTINCT condition_id, outcome FROM signals WHERE asset='' AND condition_id!=''").fetchall()
+    if not rows:
+        print("没有需要回填的信号（都已带 asset）")
+        return 0
+    print(f"待回填 condition_id: {len(rows)} 条（可能重复）")
+    done = 0
+    updated = 0
+    cache = {}
+    for r in rows:
+        cid = r["condition_id"]
+        outcome = (r["outcome"] or "").strip().lower()
+        if cid in cache:
+            mapping = cache[cid]
+        else:
+            mapping = store.backfill_asset(cid)
+            cache[cid] = mapping
+            done += 1
+            if done % 20 == 0:
+                print(f"  已处理 {done} 个 condition_id...")
+                time.sleep(1)
+        token = mapping.get(outcome)
+        if token:
+            conn.execute("UPDATE signals SET asset=? WHERE condition_id=? AND asset=''",
+                         (str(token), cid))
+            updated += 1
+        time.sleep(0.2)
+    conn.commit()
+    print(f"处理 {len(rows)} 条，回填 {updated} 条信号 asset")
+    return 0
+
+
 def cmd_run() -> int:
     from src.monitor.watcher import Watcher
     cfg = get_config()
@@ -390,6 +431,7 @@ def main() -> int:
     sub.add_parser("run", help="启动监控守护（默认）")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
+    sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
     rep = sub.add_parser("report", help="数据分析日报（分类汇总）")
     rep.add_argument("--days", type=int, default=7, help="统计近 N 天（默认7）")
     rep.add_argument("--top", type=int, default=10, help="钱包Top N（默认10）")
@@ -435,6 +477,8 @@ def main() -> int:
             tag_p.print_help()
             return 2
         return cmd_tag(args)
+    if cmd == "backfill":
+        return cmd_backfill()
     if cmd == "run":
         return cmd_run()
     if cmd == "seed":

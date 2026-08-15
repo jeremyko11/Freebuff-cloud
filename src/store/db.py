@@ -322,6 +322,81 @@ class Store:
             "cumulative_usdc": crow["usdc"],
         }
 
+
+    def backfill_asset(self, condition_id: str) -> dict:
+        """给一个 condition_id 的所有实际查询 token id（gamma clobTokenIds）并回填 signals.asset。"""
+        import urllib.parse
+        from src.api.data_api import _get_session
+        if not condition_id:
+            return {}
+        cid = condition_id.strip().lower()
+        try:
+            url = "https://gamma-api.polymarket.com/markets?" + urllib.parse.urlencode({"condition_ids": cid})
+            resp = _get_session().get(url, timeout=8)
+            if resp.status_code == 429:
+                return {}
+            resp.raise_for_status()
+            markets = resp.json()
+            if not markets:
+                return {}
+            m = markets[0]
+            import json as _json
+            outcomes = m.get("outcomes") or []
+            token_ids = m.get("clobTokenIds") or []
+            # gamma 返回的是 JSON 字符串，需解析为数组
+            if isinstance(outcomes, str):
+                try:
+                    outcomes = _json.loads(outcomes)
+                except Exception:
+                    outcomes = []
+            if isinstance(token_ids, str):
+                try:
+                    token_ids = _json.loads(token_ids)
+                except Exception:
+                    token_ids = []
+            if not outcomes or not token_ids or len(outcomes) != len(token_ids):
+                return {}
+            mapping = {str(o).strip().lower(): t for o, t in zip(outcomes, token_ids)}
+            return mapping
+        except Exception as e:
+            logger.debug("gamma backfill 失败 %s: %s", cid[:16], e)
+            return {}
+
+    def wallet_today_pnl(self, address: str) -> dict:
+        """估算钱包今日盈亏（用当前市场价 vs 买入价，仅对有 asset 的信号）。
+
+        返回 {n_estimated, total_pnl, win_count, loss_count}。
+        估算方法：买入信号 BUY => pnl ≈ usdc*(cur/buy - 1)；SELL 反向。
+        cur 取 market 当前 mid（fetch_mid），无 asset 或取价失败则跳过该条。
+        """
+        from datetime import datetime
+        from src.api.prices import fetch_mid
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, side, usdc, price, asset FROM signals "
+                "WHERE address=? AND created_at>=? AND asset!=''",
+                (address, today_start)).fetchall()
+        total = 0.0
+        wins = 0
+        losses = 0
+        n_est = 0
+        for r in rows:
+            cur = fetch_mid(r["asset"])
+            if cur is None or (r["price"] or 0) <= 0:
+                continue
+            ratio = cur / r["price"] - 1.0
+            if r["side"] == "SELL":
+                ratio = -ratio
+            pnl = (r["usdc"] or 0) * ratio
+            total += pnl
+            n_est += 1
+            if pnl > 0:
+                wins += 1
+            elif pnl < 0:
+                losses += 1
+        return {"n_estimated": n_est, "total_pnl": total, "win_count": wins, "loss_count": losses}
+
     def compute_market_type(self, address: str) -> str:
         """根据该钱包历史信号的 slug 推断主导市场类型并写回。"""
         from src.smart.market_tags import wallet_market_type
@@ -356,6 +431,7 @@ class Store:
         # 实时分类：市场分类（slug）+ 来源类型（钱包 source）
         from src.smart.market_tags import classify_slug
         cat, league = classify_slug(s.slug or "")
+        s_asset = getattr(s, "asset", "") or ""
         stype = "排行榜"
         try:
             src = self._conn.execute(
@@ -382,7 +458,7 @@ class Store:
                      market_category,market_league,wallet_source_type)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
                 (time.time(), s.ts, s.address, s.wallet_name, s.type, s.side,
-                 s.conditionId, asset or "", s.outcome, s.title, s.slug, s.usdc,
+                 s.conditionId, s_asset or asset or "", s.outcome, s.title, s.slug, s.usdc,
                  s.price, s.trade_count, ",".join(s.tx_hashes), s.dedup_key, s.price,
                  cat, league, stype))
             if s.type == "OPEN":

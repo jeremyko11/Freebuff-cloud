@@ -34,6 +34,7 @@ class Signal:
     slug: str
     usdc: float
     price: float
+    asset: str = ""      # clob token id（查当前价/验证用）
     trade_count: int = 1
     tx_hashes: list = field(default_factory=list)
     ts: float = 0.0
@@ -94,6 +95,7 @@ def detect_signals(
             outcome=a["outcome"],
             title=a["title"],
             slug=a["slug"],
+            asset=a.get("asset") or "",
             usdc=a["usdcSize"],
             price=a["price"],
             tx_hashes=[a["transactionHash"]] if a["transactionHash"] else [],
@@ -134,6 +136,7 @@ def detect_signals(
                         outcome=outcome,
                         title=last["title"],
                         slug=last["slug"],
+                        asset=last.get("asset") or "",
                         usdc=total,
                         price=last["price"],
                         trade_count=len(window),
