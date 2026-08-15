@@ -97,7 +97,8 @@ class Watcher:
         vol_s = f"${pf.get('volume') or 0:,.0f}"
         recent = f"{pf.get('recent_n') or 0}笔 · ${pf.get('recent_usdc') or 0:,.0f}"
         lines.append(f"📊 战绩：胜率{wr} · 盈亏{pnl_s} · 成交{vol_s}")
-        lines.append(f"近{pf.get('days') or 7}天：{recent}")
+        today = f"{pf.get('today_n') or 0}笔 · ${pf.get('today_usdc') or 0:,.0f}"
+        lines.append(f"今日：{today} | 近{pf.get('days') or 7}天：{recent}")
         return lines
 
     def _notify_signal(self, s: Signal) -> None:

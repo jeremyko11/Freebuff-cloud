@@ -3,6 +3,7 @@ import logging
 import sqlite3
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from src.smart.tagging import derive_auto_tags
@@ -190,6 +191,12 @@ class Store:
                 "SELECT COUNT(*) AS n, COALESCE(SUM(usdc),0) AS usdc "
                 "FROM signals WHERE address=? AND created_at>?",
                 (address, since)).fetchone()
+            # 当日（本地时区从 0 点起）
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            trow = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(usdc),0) AS usdc "
+                "FROM signals WHERE address=? AND created_at>=?",
+                (address, today_start)).fetchone()
         return {
             "pnl": w["pnl"] or 0.0,
             "volume": w["volume"] or 0.0,
@@ -199,6 +206,8 @@ class Store:
             "recent_n": row["n"],
             "recent_usdc": row["usdc"],
             "days": days,
+            "today_n": trow["n"],
+            "today_usdc": trow["usdc"],
         }
 
     # ---------------- signals ----------------
