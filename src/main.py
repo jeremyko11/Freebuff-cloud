@@ -25,8 +25,9 @@ def _setup_logging(level: str) -> None:
 
 
 def _fmt_tags(auto: list[str], manual: list[str]) -> str:
-    parts = [f"[{t}]" for t in manual]
-    parts += [f"<{t}>" for t in auto]
+    from src.smart.tagging import with_emoji
+    parts = [f"[{with_emoji(t)}]" for t in manual]
+    parts += [f"<{with_emoji(t)}>" for t in auto]
     return " ".join(parts) if parts else "-"
 
 
