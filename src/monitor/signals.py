@@ -34,10 +34,13 @@ class Signal:
     slug: str
     usdc: float
     price: float
+    asset: str = ""      # clob token id（查当前价/验证用）
     trade_count: int = 1
     tx_hashes: list = field(default_factory=list)
     ts: float = 0.0
     dedup_key: str = ""
+    tags: list = field(default_factory=list)  # 钱包标签（推送展示用）
+    market_label: str = ""            # 市场分类展示（如 ⚽ 足球）
 
 
 def _hour_bucket(ts_ms: float) -> int:
@@ -92,6 +95,7 @@ def detect_signals(
             outcome=a["outcome"],
             title=a["title"],
             slug=a["slug"],
+            asset=a.get("asset") or "",
             usdc=a["usdcSize"],
             price=a["price"],
             tx_hashes=[a["transactionHash"]] if a["transactionHash"] else [],
@@ -132,6 +136,7 @@ def detect_signals(
                         outcome=outcome,
                         title=last["title"],
                         slug=last["slug"],
+                        asset=last.get("asset") or "",
                         usdc=total,
                         price=last["price"],
                         trade_count=len(window),

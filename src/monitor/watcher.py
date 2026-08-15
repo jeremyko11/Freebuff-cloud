@@ -49,6 +49,12 @@ class Watcher:
         passed, rejected = build_watchlist(self.cfg.smart)
         self.watchlist = passed
         self.store.upsert_wallets(passed)
+        # 为每个钱包按历史信号推断主导市场类型
+        for w in passed:
+            try:
+                self.store.compute_market_type(w.address)
+            except Exception:
+                pass
         dt = time.time() - t0
         logger.info("名单刷新完成：%d 个钱包，耗时 %.0fs", len(passed), dt)
         # 终端打印名单
@@ -95,7 +101,66 @@ class Watcher:
                 self._notify_signal(s)
         return n_signals
 
+    @staticmethod
+    def _perf_lines(pf: dict) -> list[str]:
+        """钱包战绩 → 展示行。"""
+        lines = []
+        wr = f"{pf['win_rate']:.0%}" if pf.get("win_rate") is not None else "-"
+        pnl = pf.get("pnl") or 0.0
+        if pnl > 0:
+            pnl_s = f"+${pnl:,.0f}"
+        elif pnl < 0:
+            pnl_s = f"-${-pnl:,.0f}"
+        else:
+            pnl_s = "$0"
+        vol_s = f"${pf.get('volume') or 0:,.0f}"
+        recent = f"{pf.get('recent_n') or 0}笔 · ${pf.get('recent_usdc') or 0:,.0f}"
+        lines.append(f"📊 战绩：胜率{wr} · 盈亏{pnl_s} · 成交{vol_s}")
+        today = f"{pf.get('today_n') or 0}笔 · 投注${pf.get('today_usdc') or 0:,.0f}"
+        cum = f"{pf.get('cumulative_n') or 0}笔 · 投注${pf.get('cumulative_usdc') or 0:,.0f}"
+        t_n = pf.get('today_n') or 0
+        c_n = pf.get('cumulative_n') or 0
+        if c_n == t_n:
+            # 数据窗口内只有今日数据 -> 累计即今日，明确提示
+            lines.append(f"今日：{today}（数据窗口内累计即今日）")
+        else:
+            lines.append(f"今日：{today} | 累计：{cum}")
+        return lines
+
     def _notify_signal(self, s: Signal) -> None:
+        # 注入钱包标签（自动+手动）供推送展示
+        try:
+            auto, manual, _ = self.store.wallet_tags(s.address)
+            s.tags = manual + auto
+        except Exception:
+            s.tags = []
+        perf = None
+        try:
+            perf = self.store.wallet_performance(s.address)
+        except Exception:
+            perf = None
+        # 市场分类：缺失则探测一次（避免每次推送都算；算一次后库里有）
+        market = self.store.get_market_type(s.address)
+        if not market:
+            try:
+                market = self.store.compute_market_type(s.address)
+            except Exception:
+                market = ""
+        # 来源标识：社区/手动推荐钱包（source 以 community: 开头）
+        src_label = ""
+        try:
+            wrow = self.store.get_wallet(s.address)
+            if wrow and wrow.get("source", "").startswith("community:"):
+                src_label = wrow["source"].split(":", 1)[1]
+                src_label = {"x": "X/Twitter", "reddit": "Reddit", "manual": "手动关注",
+                             "custom": "自定义", "community": "社区推荐",
+                             "smallcap": "小资金聪明钱"}.get(src_label, src_label or "社区推荐")
+        except Exception:
+            pass
+        # 市场分类放信号开头第二行
+        if market:
+            from src.smart.market_tags import market_label
+            s.market_label = market_label(market)
         # 终端彩色输出
         _COLORS = {"OPEN": "\033[92m", "ADD": "\033[93m", "REDUCE": "\033[91m", "SWEEP": "\033[95m"}
         _RESET = "\033[0m"
@@ -105,6 +170,8 @@ class Watcher:
         who = s.wallet_name or f"{s.address[:8]}…{s.address[-4:]}"
         print(f"\n{c}{'='*50}")
         print(f"  {_LABELS.get(s.type, s.type)}  {who}")
+        if s.market_label:
+            print(f"  {s.market_label}")
         print(f"  市场：{s.title}")
         print(f"  方向：{s.side} {s.outcome} @ {s.price:.3f}")
         print(f"  金额：${s.usdc:,.0f}")
@@ -113,11 +180,30 @@ class Watcher:
         if s.slug:
             print(f"  链接：https://polymarket.com/event/{s.slug}")
         print(f"{c}{'='*50}{r}")
-        # 同时写日志
-        logger.info("信号 [%s] %s %s %s $%.0f @%.3f", s.type, s.wallet_name or s.address[:10],
-                    s.side, s.outcome, s.usdc, s.price)
+        # 同时写日志（含标签）
+        logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
+                    s.side, s.outcome, s.usdc, s.price, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
-            send_message(self.cfg.telegram, format_signal(s))
+            body = format_signal(s)
+            if perf:
+                body += "\n" + "\n".join(self._perf_lines(perf))
+            # 今日盈亏估算（当前价 vs 买入价，仅在可估算时展示）
+            try:
+                tpnl = self.store.wallet_today_pnl(s.address)
+                if tpnl["n_estimated"] > 0:
+                    amt = tpnl["total_pnl"]
+                    if amt > 0:
+                        pnl_s = f"+${amt:,.0f}"
+                    elif amt < 0:
+                        pnl_s = f"-${-amt:,.0f}"
+                    else:
+                        pnl_s = "$0"
+                    body += f"\n📈 今日盈亏估算：{pnl_s}（{tpnl['win_count']}赢/{tpnl['loss_count']}亏，估{tpnl['n_estimated']}笔）"
+            except Exception:
+                pass
+            if src_label:
+                body += "\n🔗 来自 " + src_label + " 推荐"
+            send_message(self.cfg.telegram, body)
 
     # ------------------------------------------------------------------
     def verify_pending(self) -> None:

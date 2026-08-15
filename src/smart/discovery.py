@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from src.api import data_api
 from src.config import SmartMoneyConfig
+from src.smart import watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,13 @@ def _seed_from_leaderboards(cfg: SmartMoneyConfig) -> dict[str, Wallet]:
     return candidates
 
 
+def _source_label(src: str) -> str:
+    return {
+        "x": "X/Twitter", "reddit": "Reddit", "manual": "手动关注",
+        "custom": "自定义", "community": "社区推荐", "smallcap": "小资金聪明钱",
+    }.get(src, src or "社区推荐")
+
+
 def build_watchlist(cfg: SmartMoneyConfig) -> tuple[list[Wallet], list[Wallet]]:
     """构建监控名单。
 
@@ -124,18 +132,35 @@ def build_watchlist(cfg: SmartMoneyConfig) -> tuple[list[Wallet], list[Wallet]]:
     candidates = _seed_from_leaderboards(cfg)
     logger.info("播种完成：%d 个候选地址", len(candidates))
 
-    # 手动追加
+    # 手动追加（.env SM_EXTRA_ADDRESSES）
     for addr in cfg.extra_addresses:
         addr = addr.lower()
         if addr and addr not in candidates:
             candidates[addr] = Wallet(address=addr, source="manual")
+
+    # 社区/手动推荐钱包（data/watchlist.json）
+    try:
+        for rec in watchlist.active(cfg.watchlist_path):
+            addr = rec["address"]
+            src = rec.get("source") or "community"
+            note = rec.get("note") or ""
+            if addr and addr not in candidates:
+                w = Wallet(address=addr, source="community:" + src)
+                w.extra = {"note": note, "source_label": _source_label(src)}
+                candidates[addr] = w
+            elif addr in candidates and candidates[addr].source == "manual":
+                candidates[addr].source = "community:" + src
+                candidates[addr].extra.setdefault("note", note)
+                candidates[addr].extra["source_label"] = _source_label(src)
+    except Exception as e:
+        logger.warning("加载 watchlist.json 失败: %s", e)
 
     rejected: list[Wallet] = []
 
     # 准入 + 剔除
     passed: list[Wallet] = []
     for w in candidates.values():
-        if w.source == "manual":
+        if w.source == "manual" or w.source.startswith("community:"):
             w.reason = ""
             passed.append(w)
             continue

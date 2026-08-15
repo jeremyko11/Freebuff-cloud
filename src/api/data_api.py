@@ -158,6 +158,50 @@ def fetch_activity(address: str, limit: int = 100, start_ts: int = None) -> list
     return [normalize_activity(a) for a in data]
 
 
+def fetch_positions(address: str, limit: int = 50) -> list[dict]:
+    """某地址当前持仓（含实时/已实现 PnL）。返回原始 dict 列表。"""
+    params = urllib.parse.urlencode({"user": address, "limit": str(min(limit, 50))})
+    data = _request_json(f"{DATA_API_BASE}/positions?{params}")
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def fetch_trades_global(limit: int = 100) -> list[dict]:
+    """全局最新成交流（免鉴权）。每条含 proxyWallet/name/pseudonym/slug。"""
+    params = urllib.parse.urlencode({"limit": str(min(limit, 500))})
+    data = _request_json(f"{DATA_API_BASE}/trades?{params}")
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def fetch_trades_by_slug(slug: str, limit: int = 200) -> list[dict]:
+    """某市场（slug）的成交流，含参与者的 name/pseudonym/proxyWallet。"""
+    params = urllib.parse.urlencode({"slug": slug, "limit": str(min(limit, 500))})
+    data = _request_json(f"{DATA_API_BASE}/trades?{params}")
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def wallet_profit_metrics(address: str) -> dict:
+    """聚合某地址持仓的盈利指标。返回 dict, 无数据时全 0/None。"""
+    positions = fetch_positions(address, limit=50)
+    if not positions:
+        return {"cash_pnl": 0.0, "realized_pnl": 0.0, "percent_pnl": None,
+                "n_positions": 0, "volume": 0.0}
+    realized = sum((p.get("realizedPnl") or 0.0) for p in positions)
+    cash = sum((p.get("cashPnl") or 0.0) for p in positions)
+    pcts = [p.get("percentRealizedPnl") for p in positions if p.get("percentRealizedPnl") is not None]
+    avg_pct = sum(pcts) / len(pcts) if pcts else None
+    vol = sum((p.get("totalBought") or 0.0) for p in positions)
+    return {
+        "cash_pnl": cash, "realized_pnl": realized, "percent_pnl": avg_pct,
+        "n_positions": len(positions), "volume": vol,
+    }
+
+
 def fetch_closed_positions(address: str, limit: int = 50) -> list[dict]:
     """已平仓持仓（算胜率/利润因子用）。"""
     params = urllib.parse.urlencode({
