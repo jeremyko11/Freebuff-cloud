@@ -71,6 +71,10 @@ def format_signal(s: Signal) -> str:
     url = f"https://polymarket.com/event/{s.slug}" if s.slug else ""
     lines = [
         f"{emoji} <b>[{type_label}]</b> {who}",
+    ]
+    if getattr(s, "market_label", ""):
+        lines.append(f"🏷️ {s.market_label}")
+    lines += [
         f"市场：{title}",
         f"方向：<b>{s.side} {s.outcome}</b> @ {s.price:.3f}",
         f"金额：<b>${s.usdc:,.0f}</b>",

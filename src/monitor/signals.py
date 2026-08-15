@@ -39,6 +39,7 @@ class Signal:
     ts: float = 0.0
     dedup_key: str = ""
     tags: list = field(default_factory=list)  # 钱包标签（推送展示用）
+    market_label: str = ""            # 市场分类展示（如 ⚽ 足球）
 
 
 def _hour_bucket(ts_ms: float) -> int:

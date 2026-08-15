@@ -137,15 +137,16 @@ class Watcher:
                              "smallcap": "小资金聪明钱"}.get(src_label, src_label or "社区推荐")
         except Exception:
             pass
+        # 市场分类放信号开头第二行
+        if market:
+            from src.smart.market_tags import market_label
+            s.market_label = market_label(market)
         logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
                     s.side, s.outcome, s.usdc, s.price, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
             body = format_signal(s)
             if perf:
                 body += "\n" + "\n".join(self._perf_lines(perf))
-            if market:
-                from src.smart.market_tags import market_label
-                body += "\n" + market_label(market)
             if src_label:
                 body += "\n🔗 来自 " + src_label + " 推荐"
             send_message(self.cfg.telegram, body)
