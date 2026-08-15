@@ -81,25 +81,12 @@ class MonitorConfig:
 
 
 @dataclass
-class BinanceLeadConfig:
-    """Binance 领先信号：监听 Binance BTC 价格突变，检测 Polymarket 5M 市场是否滞后。"""
-    enabled: bool = os.environ.get("BIN_ENABLED", "1") not in ("0", "false")
-    poll_interval_sec: int = _env_int("BIN_POLL_INTERVAL_SEC", 10)     # Binance 轮询间隔
-    move_threshold: float = _env_float("BIN_MOVE_THRESHOLD", 0.0005)   # 价格突变阈值 0.05%
-    window_sec: int = _env_int("BIN_WINDOW_SEC", 60)                   # 观察窗口
-    lag_threshold: float = _env_float("BIN_LAG_THRESHOLD", 0.01)       # Polymarket 滞后阈值
-    min_signal_usdc: float = _env_float("BIN_MIN_SIGNAL_USDC", 500.0)  # 信号金额门槛
-    symbol: str = os.environ.get("BIN_SYMBOL", "BTCUSDT")
-
-
-@dataclass
 class Config:
     db_path: Path = Path(os.environ.get("FB_DB_PATH", "data/freebuff.db"))
     log_level: str = os.environ.get("FB_LOG_LEVEL", "INFO")
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     smart: SmartMoneyConfig = field(default_factory=SmartMoneyConfig)
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
-    binance: BinanceLeadConfig = field(default_factory=BinanceLeadConfig)
 
     def __post_init__(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
