@@ -107,9 +107,8 @@ class Watcher:
         vol_s = f"${pf.get('volume') or 0:,.0f}"
         recent = f"{pf.get('recent_n') or 0}笔 · ${pf.get('recent_usdc') or 0:,.0f}"
         lines.append(f"📊 战绩：胜率{wr} · 盈亏{pnl_s} · 成交{vol_s}")
-        today = f"{pf.get('today_n') or 0}笔 · ${pf.get('today_usdc') or 0:,.0f}"
-        # 时间口径：今日 与 全周期累计（避免 bot 刚启动时「今日==近7天」造成的困惑）
-        cum = f"{pf.get('cumulative_n') or 0}笔 · ${pf.get('cumulative_usdc') or 0:,.0f}"
+        today = f"{pf.get('today_n') or 0}笔 · 投注${pf.get('today_usdc') or 0:,.0f}"
+        cum = f"{pf.get('cumulative_n') or 0}笔 · 投注${pf.get('cumulative_usdc') or 0:,.0f}"
         t_n = pf.get('today_n') or 0
         c_n = pf.get('cumulative_n') or 0
         if c_n == t_n:

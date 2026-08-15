@@ -302,7 +302,7 @@ def cmd_report(args) -> int:
     # ---- 总览 ----
     tot = conn.execute(f"SELECT COUNT(*) n, COALESCE(SUM(usdc),0) usdc, COUNT(DISTINCT address) wa FROM signals WHERE 1=1{tcond}").fetchone()
     print(f"\n【总览】")
-    print(f"  信号总数: {tot['n']}  投入金额: ${tot['usdc']:,.0f}  涉及钱包: {tot['wa']}")
+    print(f"  信号总数: {tot['n']}  投注金额: ${tot['usdc']:,.0f}  涉及钱包: {tot['wa']}")
     nw = conn.execute("SELECT COUNT(*) FROM wallets WHERE active=1").fetchone()[0]
     print(f"  当前活跃监控钱包: {nw}")
 
