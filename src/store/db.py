@@ -303,6 +303,10 @@ class Store:
                 "SELECT COUNT(*) AS n, COALESCE(SUM(usdc),0) AS usdc "
                 "FROM signals WHERE address=? AND created_at>=?",
                 (address, today_start)).fetchone()
+            # 全周期累计（从库最早记录）
+            crow = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(usdc),0) AS usdc "
+                "FROM signals WHERE address=?", (address,)).fetchone()
         return {
             "pnl": w["pnl"] or 0.0,
             "volume": w["volume"] or 0.0,
@@ -314,6 +318,8 @@ class Store:
             "days": days,
             "today_n": trow["n"],
             "today_usdc": trow["usdc"],
+            "cumulative_n": crow["n"],
+            "cumulative_usdc": crow["usdc"],
         }
 
     def compute_market_type(self, address: str) -> str:

@@ -104,7 +104,15 @@ class Watcher:
         recent = f"{pf.get('recent_n') or 0}笔 · ${pf.get('recent_usdc') or 0:,.0f}"
         lines.append(f"📊 战绩：胜率{wr} · 盈亏{pnl_s} · 成交{vol_s}")
         today = f"{pf.get('today_n') or 0}笔 · ${pf.get('today_usdc') or 0:,.0f}"
-        lines.append(f"今日：{today} | 近{pf.get('days') or 7}天：{recent}")
+        # 时间口径：今日 与 全周期累计（避免 bot 刚启动时「今日==近7天」造成的困惑）
+        cum = f"{pf.get('cumulative_n') or 0}笔 · ${pf.get('cumulative_usdc') or 0:,.0f}"
+        t_n = pf.get('today_n') or 0
+        c_n = pf.get('cumulative_n') or 0
+        if c_n == t_n:
+            # 数据窗口内只有今日数据 -> 累计即今日，明确提示
+            lines.append(f"今日：{today}（数据窗口内累计即今日）")
+        else:
+            lines.append(f"今日：{today} | 累计：{cum}")
         return lines
 
     def _notify_signal(self, s: Signal) -> None:
