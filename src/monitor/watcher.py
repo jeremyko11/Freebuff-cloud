@@ -178,7 +178,7 @@ class Watcher:
         if s.type == "SWEEP":
             print(f"  累积：{s.trade_count} 笔小单")
         if s.slug:
-            print(f"  链接：https://polymarket.com/event/{s.slug}")
+            print(f"  链接：https://polymarket.com/market/{s.slug}")
         print(f"{c}{'='*50}{r}")
         # 同时写日志（含标签）
         logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
