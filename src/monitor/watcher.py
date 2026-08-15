@@ -51,6 +51,15 @@ class Watcher:
         self.store.upsert_wallets(passed)
         dt = time.time() - t0
         logger.info("名单刷新完成：%d 个钱包，耗时 %.0fs", len(passed), dt)
+        # 终端打印名单
+        print(f"\n\033[96m{'='*50}")
+        print(f"  📋 聪明钱名单（{len(passed)} 个入围 / {len(rejected)} 个淘汰）")
+        print(f"  ⏱️  耗时 {dt:.0f}s")
+        print(f"{'='*50}\033[0m")
+        for i, w in enumerate(passed, 1):
+            wr = f"{w.win_rate:.0%}" if w.win_rate is not None else "-"
+            print(f"  {i:>2}. [{w.score:>5.1f}分] 胜率{wr:>4} | PnL ${w.pnl:>10,.0f} | {w.name or w.address[:16]}")
+        print(f"\033[96m{'='*50}\033[0m\n")
         if self.cfg.telegram.enabled:
             lines = [f"<b>名单刷新</b> {_now_str()}（{dt:.0f}s）"]
             lines.append(f"入围 <b>{len(passed)}</b> 个 / 淘汰 {len(rejected)} 个")
@@ -87,6 +96,24 @@ class Watcher:
         return n_signals
 
     def _notify_signal(self, s: Signal) -> None:
+        # 终端彩色输出
+        _COLORS = {"OPEN": "\033[92m", "ADD": "\033[93m", "REDUCE": "\033[91m", "SWEEP": "\033[95m"}
+        _RESET = "\033[0m"
+        _LABELS = {"OPEN": "🟢 新开仓", "ADD": "🟡 加仓", "REDUCE": "🔴 减仓/平仓", "SWEEP": "💸 拆单建仓"}
+        c = _COLORS.get(s.type, "")
+        r = _RESET
+        who = s.wallet_name or f"{s.address[:8]}…{s.address[-4:]}"
+        print(f"\n{c}{'='*50}")
+        print(f"  {_LABELS.get(s.type, s.type)}  {who}")
+        print(f"  市场：{s.title}")
+        print(f"  方向：{s.side} {s.outcome} @ {s.price:.3f}")
+        print(f"  金额：${s.usdc:,.0f}")
+        if s.type == "SWEEP":
+            print(f"  累积：{s.trade_count} 笔小单")
+        if s.slug:
+            print(f"  链接：https://polymarket.com/event/{s.slug}")
+        print(f"{c}{'='*50}{r}")
+        # 同时写日志
         logger.info("信号 [%s] %s %s %s $%.0f @%.3f", s.type, s.wallet_name or s.address[:10],
                     s.side, s.outcome, s.usdc, s.price)
         if self.cfg.telegram.enabled:

@@ -64,12 +64,25 @@ def cmd_run() -> int:
     return 0
 
 
+def cmd_lead() -> int:
+    """Binance 领先信号监控（5 分钟/15 分钟 BTC 市场专用）。"""
+    from src.monitor.binance_lead import run_lead_loop
+    from src.notify.telegram import send_message
+    cfg = get_config()
+    if not cfg.telegram.enabled:
+        logging.getLogger(__name__).warning(
+            "TG_BOT_TOKEN / TG_CHAT_ID 未配置，领先信号只在终端显示")
+    run_lead_loop(cfg.binance, telegram=send_message if cfg.telegram.enabled else None)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="freebuff", description="Polymarket 聪明钱跟踪 bot")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("run", help="启动监控守护（默认）")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
+    sub.add_parser("lead", help="Binance 领先信号监控（5M BTC 市场专用）")
     args = parser.parse_args()
 
     cfg = get_config()
@@ -82,6 +95,8 @@ def main() -> int:
         return cmd_seed()
     if cmd == "status":
         return cmd_status()
+    if cmd == "lead":
+        return cmd_lead()
     parser.error(f"未知命令: {cmd}")
     return 2
 
