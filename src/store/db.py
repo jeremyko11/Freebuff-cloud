@@ -48,7 +48,10 @@ CREATE TABLE IF NOT EXISTS signals (
     notified INTEGER DEFAULT 0,
     price_at_signal REAL,
     verified_1h REAL,
-    verified_24h REAL
+    verified_24h REAL,
+    market_category TEXT,
+    market_league TEXT,
+    wallet_source_type TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_signals_dedup ON signals(dedup_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_addr ON signals(address, ts DESC);
@@ -66,6 +69,14 @@ CREATE TABLE IF NOT EXISTS wallet_markets (
     first_seen REAL,
     PRIMARY KEY (address, condition_id)
 );
+CREATE TABLE IF NOT EXISTS market_categories (
+    prefix TEXT PRIMARY KEY,
+    level TEXT,
+    category TEXT,
+    league TEXT,
+    emoji TEXT,
+    ord INTEGER
+);
 """
 
 
@@ -78,6 +89,87 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         with self._conn:
             self._conn.executescript(_SCHEMA)
+        self._ensure_classification()
+
+    def _ensure_classification(self) -> None:
+        """迁移旧库：给 signals 加分类列、填充 market_categories 字典、回填存量分类。"""
+        # 1) add missing columns on legacy db
+        with self._lock, self._conn:
+            sig_cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(signals)")]
+            for col in ("market_category", "market_league", "wallet_source_type"):
+                if col not in sig_cols:
+                    self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} TEXT")
+            # 2) seed category dict
+            from src.smart.market_tags import market_dict
+            self._conn.execute("DELETE FROM market_categories")
+            for row in market_dict():
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO market_categories (prefix,level,category,league,emoji,ord) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (row["prefix"], row["level"], row["category"], row["league"], row["emoji"], row["ord"]))
+            # 3) backfill existing signals (only where missing)
+            from src.smart.market_tags import classify_slug
+            rows = self._conn.execute(
+                "SELECT id, slug, address FROM signals WHERE (market_category IS NULL OR market_category='')"
+            ).fetchall()
+            if rows:
+                blank = self._conn.execute(
+                    "SELECT address, source FROM wallets").fetchall()
+                src_map = {r["address"]: (r["source"] or "") for r in blank}
+                n = 0
+                for r in rows:
+                    cat, league = classify_slug(r["slug"] or "")
+                    source_raw = src_map.get(r["address"], "")
+                    stype = "排行榜"
+                    if source_raw.startswith("community:smallcap"):
+                        stype = "小资金发现"
+                    elif source_raw.startswith("community:"):
+                        stype = "社区推荐"
+                    elif source_raw == "manual":
+                        stype = "手动关注"
+                    elif source_raw.startswith("lb") or source_raw == "":
+                        stype = "排行榜"
+                    self._conn.execute(
+                        "UPDATE signals SET market_category=?, market_league=?, wallet_source_type=? WHERE id=?",
+                        (cat, league, stype, r["id"]))
+                    n += 1
+                logger.info("分类回填 %d 条存量信号", n)
+            # 3b) 分析视图（回溯/回测/分析用）
+            self._conn.executescript("""
+                DROP VIEW IF EXISTS vw_signals_classified;
+                CREATE VIEW vw_signals_classified AS
+                  SELECT id, ts, created_at, address, wallet_name, type, side,
+                         outcome, title, slug, usdc, price, trade_count,
+                         notified, price_at_signal, verified_1h, verified_24h,
+                         market_category, market_league, wallet_source_type,
+                         COALESCE(market_category,'') || '-' || COALESCE(market_league,'') AS market_key
+                  FROM signals;
+
+                DROP VIEW IF EXISTS vw_signals_by_category;
+                CREATE VIEW vw_signals_by_category AS
+                  SELECT market_category,
+                         COUNT(*) AS n_signals,
+                         SUM(usdc) AS total_usdc,
+                         ROUND(AVG(price),3) AS avg_price,
+                         COUNT(DISTINCT address) AS n_wallets,
+                         SUM(CASE WHEN type='OPEN' THEN 1 ELSE 0 END) AS n_open,
+                         SUM(CASE WHEN type='ADD' THEN 1 ELSE 0 END) AS n_add,
+                         SUM(CASE WHEN type='REDUCE' THEN 1 ELSE 0 END) AS n_reduce,
+                         SUM(CASE WHEN type='SWEEP' THEN 1 ELSE 0 END) AS n_sweep
+                  FROM signals WHERE market_category IS NOT NULL
+                  GROUP BY market_category ORDER BY n_signals DESC;
+
+                DROP VIEW IF EXISTS vw_signals_by_wallet;
+                CREATE VIEW vw_signals_by_wallet AS
+                  SELECT address, wallet_name, wallet_source_type,
+                         COUNT(*) AS n_signals,
+                         SUM(usdc) AS total_usdc,
+                         COUNT(DISTINCT market_category) AS n_categories,
+                         MAX(market_category) AS top_category,
+                         COUNT(DISTINCT market_league) AS n_leagues
+                  FROM signals GROUP BY address, wallet_name, wallet_source_type
+                  ORDER BY n_signals DESC;
+            """)
 
     def close(self):
         with self._lock:
@@ -255,15 +347,38 @@ class Store:
         return row is not None
 
     def save_signal(self, s, asset: str = "") -> None:
+        # 实时分类：市场分类（slug）+ 来源类型（钱包 source）
+        from src.smart.market_tags import classify_slug
+        cat, league = classify_slug(s.slug or "")
+        stype = "排行榜"
+        try:
+            src = self._conn.execute(
+                "SELECT source FROM wallets WHERE address=?", (s.address,)).fetchone()
+            raw = (src["source"] if src else "") or ""
+            if raw.startswith("community:smallcap"):
+                stype = "小资金发现"
+            elif raw.startswith("community:"):
+                stype = "社区推荐"
+            elif raw == "manual":
+                stype = "手动关注"
+            elif raw.startswith("lb") or raw == "":
+                stype = "排行榜"
+        except Exception:
+            stype = "排行榜"
+        s._category = cat
+        s._league = league
+        s._source_type = stype
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT INTO signals (created_at,ts,address,wallet_name,type,side,
                      condition_id,asset,outcome,title,slug,usdc,price,trade_count,
-                     tx_hashes,dedup_key,notified,price_at_signal)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                     tx_hashes,dedup_key,notified,price_at_signal,
+                     market_category,market_league,wallet_source_type)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
                 (time.time(), s.ts, s.address, s.wallet_name, s.type, s.side,
                  s.conditionId, asset or "", s.outcome, s.title, s.slug, s.usdc,
-                 s.price, s.trade_count, ",".join(s.tx_hashes), s.dedup_key, s.price))
+                 s.price, s.trade_count, ",".join(s.tx_hashes), s.dedup_key, s.price,
+                 cat, league, stype))
             if s.type == "OPEN":
                 self._conn.execute(
                     """INSERT OR IGNORE INTO wallet_markets (address, condition_id, first_seen)

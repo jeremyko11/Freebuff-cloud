@@ -34,7 +34,7 @@ _CODE_SPORT = {
 
 # 加密 / 其他市场的关键词（slug 全词匹配）
 _CRYPTO_KEYWORDS = ("bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "crypto", "doge")
-_POLITICS_KEYWORDS = ("politics", "election", "trump", "biden", "president", "senate", "congress", "house")
+_POLITICS_KEYWORDS = ("politics", "election", "trump", "biden", "president", "senate", "congress", "house", "prime-minister", "invade", "war", "minister", "reelect", "party")
 _OTHER_KEYWORDS = ("will", "the-price-of-")
 
 MARKET_EMOJI = {
@@ -88,3 +88,86 @@ def market_label(market: str | None) -> str:
     if not market:
         return ""
     return f"{market_emoji(market)} {market}".strip()
+
+
+# ======================================================================
+# 细分联赛/项目（slug 前缀 -> 具体联赛名）+ 完整分类字典（建表用）
+# ======================================================================
+
+def _norm_code(code: str) -> str:
+    c = code
+    while c and c[-1].isdigit():
+        c = c[:-1]
+    return c
+
+
+_CODE_LEAGUE = {
+    "lal": "西甲", "lal2": "西乙", "clf": "意甲", "bel": "比利时甲",
+    "bel1": "比利时甲", "bra": "巴甲", "bra2": "巴乙", "bra3": "巴丙",
+    "tur": "土超", "arg": "阿甲", "argpn": "阿根廷职业联",
+    "ere": "荷甲", "spl": "苏超", "itc": "意乙", "pol": "波兰甲",
+    "por": "葡超", "rus": "俄超", "rou": "罗马尼亚甲", "rou1": "罗马尼亚甲",
+    "saf": "南非超", "saf1": "南非超", "srb": "塞尔维亚超", "aut": "奥甲",
+    "hr": "克罗地亚甲", "hr1": "克罗地亚甲", "fin": "芬超", "fin1": "芬超",
+    "es": "西甲", "es2": "西乙", "chl": "智利甲", "chl2": "智利乙",
+    "mls": "美职联", "usl": "USL", "uslc": "USLC", "bl": "德乙",
+    "bl2": "德乙", "frtc": "法国杯", "ncaa": "大学足球",
+    "mlb": "MLB", "nfl": "NFL", "wnba": "WNBA",
+    "atp": "ATP", "wta": "WTA",
+    "lol": "英雄联盟", "cs": "CS", "cs2": "CS2", "val": "瓦罗兰特",
+    "ufc": "UFC",
+}
+
+_KEYWORD_LEAGUE = {
+    "加密": ("bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "crypto", "doge", "price-of-", "biden"),
+    "政治": ("politics", "election", "trump", "president", "senate", "congress", "house", "prime-minister", "invade"),
+    "娱乐": ("oscar", "movie", "film", "box-office", "grammy", "spotify"),
+}
+
+
+def slug_to_league(slug):
+    slug = (slug or "").strip().lower()
+    if not slug:
+        return None
+    code = slug.split("-", 1)[0] if slug else ""
+    norm = _norm_code(code)
+    if norm and norm in _CODE_LEAGUE:
+        return _CODE_LEAGUE[norm]
+    for league, kws in _KEYWORD_LEAGUE.items():
+        if any(k in slug for k in kws):
+            return league
+    return None
+
+
+def classify_slug(slug):
+    cat = slug_to_sport(slug)
+    league = slug_to_league(slug)
+    return cat, league
+
+
+def market_dict():
+    from collections import defaultdict
+    cat_codes = defaultdict(set)
+    for code, sport in _CODE_SPORT.items():
+        cat_codes[sport].add(code)
+    out = []
+    order = 0
+    for cat, codes in sorted(cat_codes.items(), key=lambda kv: list(MARKET_EMOJI.keys()).index(kv[0]) if kv[0] in MARKET_EMOJI else 99):
+        out.append({"level": "category", "prefix": ",".join(sorted(codes)),
+                    "category": cat, "league": "", "emoji": MARKET_EMOJI.get(cat, ""), "ord": order})
+        order += 1
+    for code, league in _CODE_LEAGUE.items():
+        sport = _CODE_SPORT.get(_norm_code(code))
+        out.append({"level": "league", "prefix": code,
+                    "category": sport or "其他", "league": league,
+                    "emoji": MARKET_EMOJI.get(sport or "", ""), "ord": order})
+        order += 1
+    return out
+
+
+WALLET_SOURCE_TYPES = {
+    "lb": "排行榜",
+    "community": "社区推荐",
+    "smallcap": "小资金发现",
+    "manual": "手动关注",
+}
