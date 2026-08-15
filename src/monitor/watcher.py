@@ -86,6 +86,20 @@ class Watcher:
                 self._notify_signal(s)
         return n_signals
 
+    @staticmethod
+    def _perf_lines(pf: dict) -> list[str]:
+        """钱包战绩 → 展示行。"""
+        lines = []
+        wr = f"{pf['win_rate']:.0%}" if pf.get("win_rate") is not None else "-"
+        pnl = pf.get("pnl") or 0.0
+        sign = "+" if pnl >= 0 else ""
+        pnl_s = f"{sign}${pnl:,.0f}"
+        vol_s = f"${pf.get('volume') or 0:,.0f}"
+        recent = f"{pf.get('recent_n') or 0}笔 · ${pf.get('recent_usdc') or 0:,.0f}"
+        lines.append(f"📊 战绩：胜率{wr} · 盈亏{pnl_s} · 成交{vol_s}")
+        lines.append(f"近{pf.get('days') or 7}天：{recent}")
+        return lines
+
     def _notify_signal(self, s: Signal) -> None:
         # 注入钱包标签（自动+手动）供推送展示
         try:
@@ -93,10 +107,18 @@ class Watcher:
             s.tags = manual + auto
         except Exception:
             s.tags = []
+        perf = None
+        try:
+            perf = self.store.wallet_performance(s.address)
+        except Exception:
+            perf = None
         logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
                     s.side, s.outcome, s.usdc, s.price, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
-            send_message(self.cfg.telegram, format_signal(s))
+            body = format_signal(s)
+            if perf:
+                body += "\n" + "\n".join(self._perf_lines(perf))
+            send_message(self.cfg.telegram, body)
 
     # ------------------------------------------------------------------
     def verify_pending(self) -> None:

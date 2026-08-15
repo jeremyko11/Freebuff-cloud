@@ -173,6 +173,34 @@ class Store:
             manual = [t for t in (row["manual_tags"] or "").split(",") if t]
             return auto, manual, row["address"]
 
+
+    def wallet_performance(self, address: str, days: int = 7) -> dict | None:
+        """钱包战绩：累计（pnl/胜率/成交额）+ 近期活跃（近 days 天信号/投入）。
+
+        返回 dict 或 None（钱包不在名单）。
+        """
+        with self._lock:
+            w = self._conn.execute(
+                "SELECT pnl,volume,win_rate,profit_factor,closed_count,auto_tags FROM wallets WHERE address=?",
+                (address,)).fetchone()
+            if not w:
+                return None
+            since = time.time() - days * 86400
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(usdc),0) AS usdc "
+                "FROM signals WHERE address=? AND created_at>?",
+                (address, since)).fetchone()
+        return {
+            "pnl": w["pnl"] or 0.0,
+            "volume": w["volume"] or 0.0,
+            "win_rate": w["win_rate"],
+            "profit_factor": w["profit_factor"],
+            "closed_count": w["closed_count"] or 0,
+            "recent_n": row["n"],
+            "recent_usdc": row["usdc"],
+            "days": days,
+        }
+
     # ---------------- signals ----------------
 
     def signal_seen(self, dedup_key: str, window_sec: int) -> bool:
