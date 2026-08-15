@@ -397,6 +397,51 @@ class Store:
                 losses += 1
         return {"n_estimated": n_est, "total_pnl": total, "win_count": wins, "loss_count": losses}
 
+
+    def batch_pnl(self, since_ts: float = 0.0) -> list[dict]:
+        """批量估算某时间窗内每条信号的盈亏（按 asset 去重用 fetch_mid 缓存价）。
+
+        返回每条 [{id, address, wallet_name, side, usdc, price, asset, pnl}].
+        用于 report 聚合今日/周期盈亏。无 asset 或取价失败跳过。
+        """
+        from src.api.prices import fetch_mid
+        import concurrent.futures as _cf
+        cond = f" AND created_at>{since_ts:.0f}" if since_ts else ""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, address, wallet_name, side, usdc, price, asset "
+                "FROM signals WHERE asset != ''" + cond).fetchall()
+        # 唯一 asset 并发查价（线程池，避免串行慢）
+        tokens = list({r["asset"] for r in rows})
+        price_cache = {}
+        if tokens:
+            def _mid(tok):
+                try:
+                    return tok, fetch_mid(tok)
+                except Exception:
+                    return tok, None
+            with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+                for tok, cur in ex.map(_mid, tokens):
+                    if cur is not None:
+                        price_cache[tok] = cur
+        out = []
+        for r in rows:
+            token = r["asset"]
+            cur = price_cache.get(token)
+            if cur is None:
+                continue
+            if not r["price"] or r["price"] <= 0:
+                continue
+            ratio = cur / r["price"] - 1.0
+            if r["side"] == "SELL":
+                ratio = -ratio
+            pnl = (r["usdc"] or 0) * ratio
+            out.append({"id": r["id"], "address": r["address"],
+                        "wallet_name": r["wallet_name"], "side": r["side"],
+                        "usdc": r["usdc"] or 0, "price": r["price"],
+                        "asset": token, "pnl": pnl})
+        return out
+
     def compute_market_type(self, address: str) -> str:
         """根据该钱包历史信号的 slug 推断主导市场类型并写回。"""
         from src.smart.market_tags import wallet_market_type
