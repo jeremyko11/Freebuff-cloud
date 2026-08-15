@@ -432,6 +432,80 @@ def cmd_backfill() -> int:
     return 0
 
 
+def cmd_daily() -> int:
+    """汇总今日数据并推送到 Telegram（供 systemd timer 每日调用）。"""
+    import time
+    from src.store.db import Store
+    from src.config import get_config
+    from src.notify.telegram import send_message
+
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    conn = store._conn
+
+    today_start = __import__("datetime").datetime.now().replace(
+        hour=0, minute=0, second=0, microsecond=0).timestamp()
+    since = today_start
+
+    lines = []
+    now_s = __import__("time").strftime("%m-%d %H:%M")
+    lines.append(f"📊 Freebuff 日报 {now_s}")
+
+    # 今日总览
+    t = conn.execute(
+        "SELECT COUNT(*) n, COALESCE(SUM(usdc),0) usdc, COUNT(DISTINCT address) wa "
+        "FROM signals WHERE created_at>=?", (since,)).fetchone()
+    lines.append(f"信号 {t['n']} · 投注${t['usdc']:,.0f} · {t['wa']}钱包")
+
+    # 今日净盈亏估算
+    today_batch = store.batch_pnl(since)
+    if today_batch:
+        tot = sum(b["pnl"] for b in today_batch)
+        win = sum(1 for b in today_batch if b["pnl"] > 0)
+        loss = sum(1 for b in today_batch if b["pnl"] < 0)
+        s = f"+${tot:,.0f}" if tot > 0 else (f"-${-tot:,.0f}" if tot < 0 else "$0")
+        lines.append(f"📈 今日盈亏估算: {s} ({win}赚/{loss}亏 估{len(today_batch)}笔)")
+
+    # 今日市场分布
+    m = conn.execute(
+        "SELECT market_category c, COUNT(*) n FROM signals "
+        "WHERE created_at>=? AND market_category IS NOT NULL GROUP BY c ORDER BY n DESC",
+        (since,)).fetchall()
+    if m:
+        lines.append("")
+        lines.append("🏆 市场:")
+        for r in m[:6]:
+            lines.append(f"  {r['c']} {r['n']}")
+
+    # 今日钱包 Top
+    w = conn.execute(
+        "SELECT wallet_name w, COUNT(*) n, COALESCE(SUM(usdc),0) u "
+        "FROM signals WHERE created_at>=? GROUP BY w ORDER BY n DESC LIMIT 5",
+        (since,)).fetchall()
+    if w:
+        lines.append("")
+        lines.append("💼 钱包Top5:")
+        wnl = {}
+        for b in today_batch:
+            wnl[b["wallet_name"]] = wnl.get(b["wallet_name"], 0) + b["pnl"]
+        for r in w:
+            name = r["w"] or "-"
+            est = wnl.get(name, None)
+            est_s = (f"+${est:,.0f}" if est and est > 0 else (f"-${-est:,.0f}" if est and est < 0 else "$0")) if est is not None else "-"
+            lines.append(f"  {name[:16]:<16} {r['n']}信号 估{est_s}")
+
+    lines.append("")
+    lines.append("由 freebuff-cloud 自动生成")
+    body = "\n".join(lines)
+
+    if not cfg.telegram.enabled:
+        print("TG 未配置，仅本地预览：\n" + body)
+        return 0
+    ok = send_message(cfg.telegram, body)
+    print("日报已推送" if ok else "推送失败")
+    return 0 if ok else 1
+
+
 def cmd_run() -> int:
     from src.monitor.watcher import Watcher
     cfg = get_config()
@@ -462,6 +536,7 @@ def main() -> int:
     sub.add_parser("status", help="查看名单/信号/限流状态")
     sub.add_parser("lead", help="Binance 领先信号监控（5M BTC 市场专用）")
     sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
+    sub.add_parser("daily", help="推送到 Telegram 的今日日报（systemd timer 用）")
     rep = sub.add_parser("report", help="数据分析日报（分类汇总）")
     rep.add_argument("--days", type=int, default=7, help="统计近 N 天（默认7）")
     rep.add_argument("--top", type=int, default=10, help="钱包Top N（默认10）")
@@ -509,6 +584,8 @@ def main() -> int:
         return cmd_tag(args)
     if cmd == "backfill":
         return cmd_backfill()
+    if cmd == "daily":
+        return cmd_daily()
     if cmd == "run":
         return cmd_run()
     if cmd == "seed":
