@@ -93,18 +93,31 @@ class Store:
                     getattr(w, "pnl", None), getattr(w, "volume", None),
                     getattr(w, "win_rate", None), getattr(w, "profit_factor", None),
                     getattr(w, "closed_count", None), getattr(w, "score", None)))
-                self._conn.execute(
-                    """INSERT INTO wallets (address,name,pnl,volume,win_rate,profit_factor,
-                         closed_count,score,source,active,updated_at,auto_tags)
-                       VALUES (?,?,?,?,?,?,?,?,?,1,?,?)
-                       ON CONFLICT(address) DO UPDATE SET
-                         name=excluded.name, pnl=excluded.pnl, volume=excluded.volume,
-                         win_rate=excluded.win_rate, profit_factor=excluded.profit_factor,
-                         closed_count=excluded.closed_count, score=excluded.score,
-                         source=excluded.source, active=1, updated_at=excluded.updated_at,
-                         auto_tags=excluded.auto_tags""",
-                    (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
-                     w.closed_count, w.score, w.source, now, auto))
+                src = getattr(w, "source", "")
+                is_store_sourced = (src == "manual" or str(src).startswith("community:"))
+                if is_store_sourced:
+                    # 社区/手动/小资金钱包：不覆盖 pb为排行榜口径的 pnl/volume/score，避免冲掉本地统计
+                    self._conn.execute(
+                        'INSERT INTO wallets (address,name,pnl,volume,win_rate,profit_factor,'
+                        'closed_count,score,source,active,updated_at,auto_tags) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,1,?,?) '
+                        'ON CONFLICT(address) DO UPDATE SET '
+                        'active=1, updated_at=excluded.updated_at, auto_tags=excluded.auto_tags',
+                        (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
+                         w.closed_count, w.score, w.source, now, auto))
+                else:
+                    self._conn.execute(
+                        'INSERT INTO wallets (address,name,pnl,volume,win_rate,profit_factor,'
+                        'closed_count,score,source,active,updated_at,auto_tags) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,1,?,?) '
+                        'ON CONFLICT(address) DO UPDATE SET '
+                        'name=excluded.name, pnl=excluded.pnl, volume=excluded.volume, '
+                        'win_rate=excluded.win_rate, profit_factor=excluded.profit_factor, '
+                        'closed_count=excluded.closed_count, score=excluded.score, '
+                        'source=excluded.source, active=1, updated_at=excluded.updated_at, '
+                        'auto_tags=excluded.auto_tags',
+                        (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
+                         w.closed_count, w.score, w.source, now, auto))
             # 不在新名单里的标 inactive
             if wallets:
                 addrs = [w.address for w in wallets]

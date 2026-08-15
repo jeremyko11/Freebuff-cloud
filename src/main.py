@@ -135,6 +135,142 @@ def cmd_tag(args) -> int:
     return 0
 
 
+def cmd_discover(args) -> int:
+    from src.smart import capacity, watchlist
+    from src.config import get_config
+    from src.api import data_api
+    from src.store.db import Store
+    from src.smart.discovery import Wallet
+
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    wl_path = cfg.smart.watchlist_path
+
+    print(f"开始小资金聪明钱发现（热门市场 x{cfg.smart.cap_hot_markets}，预算 {cfg.smart.cap_sample_wallets} 钱包）...")
+    found = capacity.discover_capacity(cfg.smart, cfg_rates=None)
+    if not found:
+        print("本轮未筛出符合条件的潜力钱包（可在 .env 调 CAP_VOLUME_MIN/MAX、CAP_SAMPLE_WALLETS）")
+        return 0
+
+    print(f"\n筛选出 {len(found)} 个潜力小资金聪明钱，写入 watchlist：")
+    added = 0
+    for c in found:
+        src = "smallcap"
+        watchlist.add(wl_path, c.address, source=src, note=f"小资金聪明钱 real+${c.realized_pnl:.0f} market={c.market}")
+        # 也立即入库以便发现即推送
+        w = Wallet(address=c.address, name=c.name, source="community:" + src)
+        w.pnl = c.realized_pnl
+        w.volume = c.volume
+        w.extra = {"source_label": "小资金聪明钱", "note": c.market}
+        store.upsert_wallets([w])
+        try:
+            store.compute_market_type(c.address)
+        except Exception:
+            pass
+        auto, manual, _ = store.wallet_tags(c.address)
+        p = f"{c.percent_pnl:.0f}%" if c.percent_pnl is not None else "-"
+        print(f"  💡 +${c.realized_pnl:>8,.0f} | 量${c.volume:>8,.0f} | {p} | {c.name or c.address[:14]} | 市场:{c.market[:24]}")
+        added += 1
+    print(f"\n新增 {added} 个潜力钱包到观察名单（refresh 后生效；也可立即 python -m src.main seed）")
+    return 0
+
+
+def cmd_watch(args) -> int:
+    from src.smart import watchlist
+    from src.config import get_config
+    from src.store.db import Store
+
+    cfg = get_config()
+    wl_path = cfg.smart.watchlist_path
+    op = args.watch_op
+    store = Store(cfg.db_path)
+
+    if op == "add":
+        addr = (args.address or "").strip().lower()
+        if not addr or not addr.startswith("0x"):
+            print("地址格式不对（需 0x...）")
+            return 2
+        src = args.source or "manual"
+        note = args.note or ""
+        is_new = watchlist.add(wl_path, addr, source=src, note=note)
+        # 立即入库放观察名单并算标签/分类
+        from src.smart.discovery import Wallet
+        from src.api import data_api
+        w = Wallet(address=addr, source="community:" + src)
+        w.extra = {"note": note, "source_label": {"x":"X/Twitter","reddit":"Reddit","manual":"手动关注"}.get(src, src or "社区推荐")}
+        try:
+            stats = data_api.wallet_stats(addr)
+            w.win_rate, w.profit_factor, w.closed_count = stats["win_rate"], stats["profit_factor"], stats["closed_count"]
+        except Exception:
+            pass
+        store.upsert_wallets([w])
+        try:
+            store.compute_market_type(addr)
+        except Exception:
+            pass
+        verb = "新增" if is_new else "已存在，更新备注"
+        print(f"[{verb}] {addr}  (来源: {src}, 备注: {note or '-'})")
+        auto, manual, _ = store.wallet_tags(addr)
+        from src.smart.market_tags import market_label
+        print("  市场分类:", market_label(store.get_market_type(addr)) or "-")
+        return 0
+
+    if op == "list":
+        items = watchlist.all(wl_path)
+        if not items:
+            print("（推荐钱包为空）")
+            return 0
+        print(f"推荐钱包 {len(items)} 个：")
+        for it in sorted(items, key=lambda x: x.get("added_ts", 0), reverse=True):
+            act = "●" if it.get("active", True) else "○"
+            note = it.get("note") or ""
+            src = it.get("source") or "manual"
+            ts = it.get("added_ts") or 0
+            import time
+            when = time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "-"
+            print(f"  {act} {it['address']}  [{src}] {when}  {note}")
+        return 0
+
+    if op == "rm":
+        addr = (args.address or "").strip().lower()
+        ok = watchlist.remove(wl_path, addr)
+        # 从数据库名单剔除（标 inactive 或删）
+        if ok:
+            try:
+                with store._conn:
+                    store._conn.execute("UPDATE wallets SET active=0 WHERE address=?", (addr,))
+            except Exception:
+                pass
+            print(f"已移除: {addr}")
+        else:
+            print(f"未找到: {addr}")
+        return 0 if ok else 1
+
+    if op == "import":
+        # 从文件批量导入：每行 地址[,来源][,备注]
+        import os
+        fpath = args.address
+        if not os.path.exists(fpath):
+            print(f"文件不存在: {fpath}")
+            return 1
+        added = 0
+        with open(fpath, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = [x.strip() for x in line.split(",")]
+                a = parts[0].lower()
+                src = parts[1] if len(parts) > 1 else "custom"
+                note = parts[2] if len(parts) > 2 else ""
+                if watchlist.add(wl_path, a, source=src, note=note):
+                    added += 1
+        print(f"批量导入完成，新增 {added} 个")
+        return 0
+
+    return 2
+
+
 def cmd_run() -> int:
     from src.monitor.watcher import Watcher
     cfg = get_config()
@@ -159,12 +295,35 @@ def main() -> int:
         p = tag_sub.add_parser(op, help=f"{op} 标签")
         p.add_argument("who", help="钱包名或地址")
         p.add_argument("tag_values", nargs="*", help="标签（可多个）")
+    # discover subcommand
+    dsub = sub.add_parser("discover", help="发现小资金聪明钱（热门市场参与者）")
+    dsub.add_argument("--dry", action="store_true", help="只打印不写入")
+    # watch subcommand
+    watch_p = sub.add_parser("watch", help="管理社区/手动推荐钱包")
+    watch_sub = watch_p.add_subparsers(dest="watch_op")
+    wa = watch_sub.add_parser("add", help="加入推荐钱包")
+    wa.add_argument("address", help="0x 地址")
+    wa.add_argument("--source", default="manual", help="来源 x/reddit/manual/custom")
+    wa.add_argument("--note", default="", help="备注")
+    wl = watch_sub.add_parser("list", help="列出推荐钱包")
+    wl.add_argument("address", nargs="?", default=None)
+    wr = watch_sub.add_parser("rm", help="移除推荐钱包")
+    wr.add_argument("address", help="0x 地址")
+    wi = watch_sub.add_parser("import", help="从文件批量导入")
+    wi.add_argument("address", help="文件路径，每行 地址[,来源][,备注]")
     args = parser.parse_args()
 
     cfg = get_config()
     _setup_logging(cfg.log_level)
 
     cmd = args.cmd or "run"
+    if cmd == "discover":
+        return cmd_discover(args)
+    if cmd == "watch":
+        if args.watch_op is None:
+            watch_p.print_help()
+            return 2
+        return cmd_watch(args)
     if cmd == "tag":
         if args.tag_op is None:
             tag_p.print_help()

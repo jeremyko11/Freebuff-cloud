@@ -52,6 +52,12 @@ class SmartMoneyConfig:
     max_wallets: int = _env_int("SM_MAX_WALLETS", 50)              # 名单上限（控 API 用量）
     # 手动追加的观察地址（不经过准入）
     extra_addresses: list = field(default_factory=lambda: _env_list("SM_EXTRA_ADDRESSES"))
+    watchlist_path: str = os.environ.get("SM_WATCHLIST_PATH", "data/watchlist.json")
+    # 小资金聪明钱发现（聚焦热门市场参与者）
+    cap_hot_markets: int = _env_int("CAP_HOT_MARKETS", 5)
+    cap_sample_wallets: int = _env_int("CAP_SAMPLE_WALLETS", 20)
+    cap_volume_min: float = _env_float("CAP_VOLUME_MIN", 1000.0)
+    cap_volume_max: float = _env_float("CAP_VOLUME_MAX", 50000.0)
     # 做市商剔除：1h 内双向成交都活跃即视为 MM
     mm_window_sec: int = _env_int("SM_MM_WINDOW_SEC", 3600)
     mm_min_trades: int = _env_int("SM_MM_MIN_TRADES", 20)

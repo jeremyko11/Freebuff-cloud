@@ -126,6 +126,17 @@ class Watcher:
                 market = self.store.compute_market_type(s.address)
             except Exception:
                 market = ""
+        # 来源标识：社区/手动推荐钱包（source 以 community: 开头）
+        src_label = ""
+        try:
+            wrow = self.store.get_wallet(s.address)
+            if wrow and wrow.get("source", "").startswith("community:"):
+                src_label = wrow["source"].split(":", 1)[1]
+                src_label = {"x": "X/Twitter", "reddit": "Reddit", "manual": "手动关注",
+                             "custom": "自定义", "community": "社区推荐",
+                             "smallcap": "小资金聪明钱"}.get(src_label, src_label or "社区推荐")
+        except Exception:
+            pass
         logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
                     s.side, s.outcome, s.usdc, s.price, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
@@ -135,6 +146,8 @@ class Watcher:
             if market:
                 from src.smart.market_tags import market_label
                 body += "\n" + market_label(market)
+            if src_label:
+                body += "\n🔗 来自 " + src_label + " 推荐"
             send_message(self.cfg.telegram, body)
 
     # ------------------------------------------------------------------
