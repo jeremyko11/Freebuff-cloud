@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS wallets (
     active INTEGER DEFAULT 1,
     updated_at REAL,
     auto_tags TEXT DEFAULT '',
-    manual_tags TEXT DEFAULT ''
+    manual_tags TEXT DEFAULT '',
+    market_type TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,6 +210,26 @@ class Store:
             "today_n": trow["n"],
             "today_usdc": trow["usdc"],
         }
+
+    def compute_market_type(self, address: str) -> str:
+        """根据该钱包历史信号的 slug 推断主导市场类型并写回。"""
+        from src.smart.market_tags import wallet_market_type
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT slug FROM signals WHERE address=? AND slug != ''", (address,)).fetchall()
+        slugs = [r["slug"] for r in rows]
+        mtype = wallet_market_type(slugs) or ""
+        if mtype:
+            with self._lock:
+                self._conn.execute(
+                    "UPDATE wallets SET market_type=? WHERE address=?", (mtype, address))
+        return mtype
+
+    def get_market_type(self, address: str) -> str:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT market_type FROM wallets WHERE address=?", (address,)).fetchone()
+        return (row["market_type"] if row else "") or ""
 
     # ---------------- signals ----------------
 

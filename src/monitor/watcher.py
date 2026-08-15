@@ -49,6 +49,12 @@ class Watcher:
         passed, rejected = build_watchlist(self.cfg.smart)
         self.watchlist = passed
         self.store.upsert_wallets(passed)
+        # 为每个钱包按历史信号推断主导市场类型
+        for w in passed:
+            try:
+                self.store.compute_market_type(w.address)
+            except Exception:
+                pass
         dt = time.time() - t0
         logger.info("名单刷新完成：%d 个钱包，耗时 %.0fs", len(passed), dt)
         if self.cfg.telegram.enabled:
@@ -113,12 +119,22 @@ class Watcher:
             perf = self.store.wallet_performance(s.address)
         except Exception:
             perf = None
+        # 市场分类：缺失则探测一次（避免每次推送都算；算一次后库里有）
+        market = self.store.get_market_type(s.address)
+        if not market:
+            try:
+                market = self.store.compute_market_type(s.address)
+            except Exception:
+                market = ""
         logger.info("信号 [%s] %s %s %s $%.0f @%.3f %s", s.type, s.wallet_name or s.address[:10],
                     s.side, s.outcome, s.usdc, s.price, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
             body = format_signal(s)
             if perf:
                 body += "\n" + "\n".join(self._perf_lines(perf))
+            if market:
+                from src.smart.market_tags import market_label
+                body += "\n" + market_label(market)
             send_message(self.cfg.telegram, body)
 
     # ------------------------------------------------------------------

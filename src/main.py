@@ -57,11 +57,14 @@ def cmd_status() -> int:
     wallets = store.active_wallets()
     print(f"名单：{len(wallets)} 个活跃钱包")
     for w in wallets:
+        from src.smart.market_tags import market_emoji
         auto = [t for t in (w.get("auto_tags") or "").split(",") if t]
         manual = [t for t in (w.get("manual_tags") or "").split(",") if t]
         wr = f"{w['win_rate']:.0%}" if w["win_rate"] is not None else "-"
         name = w["name"] or w["address"][:16]
-        print(f"  {w['score']:>5.1f} | {wr:>4} | ${w['pnl'] or 0:>10,.0f} | {name:<24} {_fmt_tags(auto, manual)}")
+        mt = w.get("market_type") or ""
+        mt_s = f" {market_emoji(mt)}{mt}" if mt else ""
+        print(f"  {w['score']:>5.1f} | {wr:>4} | ${w['pnl'] or 0:>10,.0f} | {name:<24} {_fmt_tags(auto, manual)}{mt_s}")
     import time
     with store._conn:
         n_signals = store._conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
