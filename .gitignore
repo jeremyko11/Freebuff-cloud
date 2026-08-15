@@ -1,6 +1,7 @@
 # --- Secrets / credentials ---
 .env
 .env.*
+!.env.example
 *.env
 *credentials*
 *secret*
@@ -40,6 +41,10 @@ Thumbs.db
 desktop.ini
 
 # --- Runtime ---
+data/
+*.db
+*.sqlite*
+.pytest_cache/
 *.pid
 *.tmp
 *.cache/

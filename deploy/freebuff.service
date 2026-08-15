@@ -1,0 +1,20 @@
+[Unit]
+Description=Freebuff-cloud Polymarket smart money tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/freebuff-cloud
+ExecStart=/opt/freebuff-cloud/.venv/bin/python -m src.main
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+# 延迟重启风暴保护
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
