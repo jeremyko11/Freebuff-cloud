@@ -271,6 +271,99 @@ def cmd_watch(args) -> int:
     return 2
 
 
+def cmd_report(args) -> int:
+    """数据分析日报：分类汇总裁（利于收集/回溯/回测/分析）。"""
+    import time
+    from src.store.db import Store
+    from src.config import get_config
+
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    conn = store._conn
+
+    # 时间范围
+    days = args.days
+    since = time.time() - days * 86400
+    tcond = f" AND created_at>{since:.0f}"
+
+    print("=" * 60)
+    print(f"Freebuff 数据分析报告（近 {days} 天）")
+    print("=" * 60)
+
+    # ---- 总览 ----
+    tot = conn.execute(f"SELECT COUNT(*) n, COALESCE(SUM(usdc),0) usdc, COUNT(DISTINCT address) wa FROM signals WHERE 1=1{tcond}").fetchone()
+    print(f"\n【总览】")
+    print(f"  信号总数: {tot['n']}  投入金额: ${tot['usdc']:,.0f}  涉及钱包: {tot['wa']}")
+    nw = conn.execute("SELECT COUNT(*) FROM wallets WHERE active=1").fetchone()[0]
+    print(f"  当前活跃监控钱包: {nw}")
+
+    # ---- 按市场分类 ----
+    print(f"\n【市场分类】 (信号数 / 金额 / 钱包数 / OPEN·ADD·REDUCE·SWEEP)")
+    rows = conn.execute(f"""
+        SELECT market_category AS cat,
+               COUNT(*) n, COALESCE(SUM(usdc),0) usdc, COUNT(DISTINCT address) wa,
+               SUM(CASE WHEN type='OPEN' THEN 1 ELSE 0 END) op,
+               SUM(CASE WHEN type='ADD' THEN 1 ELSE 0 END) ad,
+               SUM(CASE WHEN type='REDUCE' THEN 1 ELSE 0 END) re,
+               SUM(CASE WHEN type='SWEEP' THEN 1 ELSE 0 END) sw
+        FROM signals WHERE market_category IS NOT NULL AND market_category != ''{tcond}
+        GROUP BY market_category ORDER BY n DESC""").fetchall()
+    for r in rows:
+        print(f"  {r['cat']:<8} {r['n']:>5}  ${r['usdc']:>10,.0f}  {r['wa']:>3}钱包  O{r['op']}·A{r['ad']}·R{r['re']}·S{r['sw']}")
+    unk = conn.execute(f"SELECT COUNT(*) FROM signals WHERE (market_category IS NULL OR market_category=''){tcond}").fetchone()[0]
+    if unk: print(f"  (未分类: {unk})")
+
+    # ---- 按来源 ----
+    print(f"\n【来源分类】")
+    srcs = conn.execute(f"""
+        SELECT wallet_source_type src, COUNT(*) n, COALESCE(SUM(usdc),0) usdc, COUNT(DISTINCT address) wa
+        FROM signals WHERE wallet_source_type IS NOT NULL AND wallet_source_type != ''{tcond}
+        GROUP BY wallet_source_type ORDER BY n DESC""").fetchall()
+    if not srcs:
+        print("  (无来源分类数据)")
+    for r in srcs:
+        print(f"  {r['src']:<10} {r['n']:>5}  ${r['usdc']:>10,.0f}  {r['wa']}钱包")
+
+    # ---- 信号类型 ----
+    print(f"\n【信号类型】")
+    types = conn.execute(f"SELECT type, COUNT(*) n, COALESCE(SUM(usdc),0) usdc FROM signals WHERE 1=1{tcond} GROUP BY type ORDER BY n DESC").fetchall()
+    tmap = {"OPEN": "🟢新开仓", "ADD": "🟡加仓", "REDUCE": "🔴减仓/平仓", "SWEEP": "💸拆单"}
+    for r in types:
+        print(f"  {tmap.get(r['type'],r['type']):<12} {r['n']:>5}  ${r['usdc']:>10,.0f}")
+
+    # ---- 按钱包（top）----
+    print(f"\n【钱包活跃 Top {args.top}】")
+    wrows = conn.execute(f"""
+        SELECT wallet_name w, COUNT(*) n, COALESCE(SUM(usdc),0) usdc,
+               COUNT(DISTINCT market_category) nc,
+               MAX(market_category) top
+        FROM signals WHERE 1=1{tcond}
+        GROUP BY wallet_name ORDER BY n DESC LIMIT ?""", (args.top,)).fetchall()
+    for r in wrows:
+        name = r['w'] or "-"
+        print(f"  {name:<18} {r['n']:>5}信号 ${r['usdc']:>10,.0f}  {r['nc']}类市场 主:{r['top']}")
+
+    # ---- 按联赛细分（top）----
+    print(f"\n【联赛细分 Top 10】")
+    lrows = conn.execute(f"""
+        SELECT market_league lg, COUNT(*) n, COALESCE(SUM(usdc),0) usdc
+        FROM signals WHERE market_league IS NOT NULL AND market_league != ''{tcond}
+        GROUP BY market_league ORDER BY n DESC LIMIT 10""").fetchall()
+    if lrows:
+        for r in lrows:
+            print(f"  {r['lg']:<14} {r['n']:>5}信号 ${r['usdc']:>10,.0f}")
+
+    # ---- 提示 ----
+    print("\n" + "=" * 60)
+    print("高级查询提示：可用 SQL 直接查视图")
+    print("  python -m src.main report            # 近7天")
+    print("  python -m src.main report --days 1   # 近1天")
+    print("  python -m src.main report --top 20   # 钱包top20")
+    print("  SQL: SELECT * FROM vw_signals_by_category;")
+    print("=" * 60)
+    return 0
+
+
 def cmd_run() -> int:
     from src.monitor.watcher import Watcher
     cfg = get_config()
@@ -287,6 +380,9 @@ def main() -> int:
     sub.add_parser("run", help="启动监控守护（默认）")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
+    rep = sub.add_parser("report", help="数据分析日报（分类汇总）")
+    rep.add_argument("--days", type=int, default=7, help="统计近 N 天（默认7）")
+    rep.add_argument("--top", type=int, default=10, help="钱包Top N（默认10）")
     tag_p = sub.add_parser("tag", help="管理钱包标签")
     tag_sub = tag_p.add_subparsers(dest="tag_op")
     tag_list = tag_sub.add_parser("list", help="查看标签")
@@ -333,6 +429,8 @@ def main() -> int:
         return cmd_run()
     if cmd == "seed":
         return cmd_seed()
+    if cmd == "report":
+        return cmd_report(args)
     if cmd == "status":
         return cmd_status()
     parser.error(f"未知命令: {cmd}")
