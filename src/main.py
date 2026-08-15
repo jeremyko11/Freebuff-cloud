@@ -322,6 +322,18 @@ def cmd_report(args) -> int:
     unk = conn.execute(f"SELECT COUNT(*) FROM signals WHERE (market_category IS NULL OR market_category=''){tcond}").fetchone()[0]
     if unk: print(f"  (未分类: {unk})")
 
+    # ---- 盈亏估算（当前价 vs 买入价，批量）----
+    print("正在估算信号盈亏（并发查价）...")
+    import time as _t
+    _t0 = _t.time()
+    batch = store.batch_pnl(since)
+    print("  盈亏估算完成：%d 条可估，耗时 %.0fs" % (len(batch), _t.time()-_t0))
+    if batch:
+        tot_pnl = sum(b["pnl"] for b in batch)
+        wins = sum(1 for b in batch if b["pnl"] > 0)
+        losses = sum(1 for b in batch if b["pnl"] < 0)
+        print("  周期净盈亏: %s （%d笔赚 / %d笔亏）" % (_sign_usd(tot_pnl), wins, losses))
+
     # ---- 按来源 ----
     print(f"\n【来源分类】")
     srcs = conn.execute(f"""
@@ -348,10 +360,15 @@ def cmd_report(args) -> int:
                (SELECT pnl FROM wallets wal WHERE wal.address=s.address) pnl
         FROM signals s WHERE 1=1{tcond}
         GROUP BY s.wallet_name ORDER BY n DESC LIMIT ?""", (args.top,)).fetchall()
+    # batch pnl per wallet
+    wnl = {}
+    for b in batch:
+        wnl[b["wallet_name"]] = wnl.get(b["wallet_name"], 0) + b["pnl"]
     for r in wrows:
         name = r['w'] or "-"
         pnl_s = _sign_usd(r['pnl']) if r['pnl'] is not None else "-"
-        print(f"  {name:<18} {r['n']:>5}信号 ${r['usdc']:>10,.0f} {pnl_s:>12}  {r['nc']}类市场 主:{r['top']}")
+        est_s = _sign_usd(wnl.get(name, 0)) if name in wnl else "-"
+        print(f"  {name:<18} {r['n']:>5}信号 ${r['usdc']:>10,.0f} 盈亏{pnl_s:>12} 估算{est_s:>9}  {r['nc']}类市场 主:{r['top']}")
 
     # ---- 按联赛细分（top）----
     print(f"\n【联赛细分 Top 10】")
