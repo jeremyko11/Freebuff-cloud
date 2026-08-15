@@ -31,6 +31,15 @@ def _fmt_tags(auto: list[str], manual: list[str]) -> str:
     return " ".join(parts) if parts else "-"
 
 
+def _sign_usd(amount: float) -> str:
+    """正负显式标注金额：+$X / -$X / $0。"""
+    if amount > 0:
+        return f"+${amount:,.0f}"
+    elif amount < 0:
+        return f"-${-amount:,.0f}"
+    return "$0"
+
+
 def cmd_seed() -> int:
     from src.smart.discovery import build_watchlist
     from src.store.db import Store
@@ -64,7 +73,7 @@ def cmd_status() -> int:
         name = w["name"] or w["address"][:16]
         mt = w.get("market_type") or ""
         mt_s = f" {market_emoji(mt)}{mt}" if mt else ""
-        print(f"  {w['score']:>5.1f} | {wr:>4} | ${w['pnl'] or 0:>10,.0f} | {name:<24} {_fmt_tags(auto, manual)}{mt_s}")
+        print(f"  {w['score']:>5.1f} | {wr:>4} | {_sign_usd(w['pnl'] or 0):>12} | {name:<24} {_fmt_tags(auto, manual)}{mt_s}")
     import time
     with store._conn:
         n_signals = store._conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
@@ -334,14 +343,15 @@ def cmd_report(args) -> int:
     # ---- 按钱包（top）----
     print(f"\n【钱包活跃 Top {args.top}】")
     wrows = conn.execute(f"""
-        SELECT wallet_name w, COUNT(*) n, COALESCE(SUM(usdc),0) usdc,
-               COUNT(DISTINCT market_category) nc,
-               MAX(market_category) top
-        FROM signals WHERE 1=1{tcond}
-        GROUP BY wallet_name ORDER BY n DESC LIMIT ?""", (args.top,)).fetchall()
+        SELECT s.wallet_name w, COUNT(*) n, COALESCE(SUM(s.usdc),0) usdc,
+               COUNT(DISTINCT s.market_category) nc, MAX(s.market_category) top,
+               (SELECT pnl FROM wallets wal WHERE wal.address=s.address) pnl
+        FROM signals s WHERE 1=1{tcond}
+        GROUP BY s.wallet_name ORDER BY n DESC LIMIT ?""", (args.top,)).fetchall()
     for r in wrows:
         name = r['w'] or "-"
-        print(f"  {name:<18} {r['n']:>5}信号 ${r['usdc']:>10,.0f}  {r['nc']}类市场 主:{r['top']}")
+        pnl_s = _sign_usd(r['pnl']) if r['pnl'] is not None else "-"
+        print(f"  {name:<18} {r['n']:>5}信号 ${r['usdc']:>10,.0f} {pnl_s:>12}  {r['nc']}类市场 主:{r['top']}")
 
     # ---- 按联赛细分（top）----
     print(f"\n【联赛细分 Top 10】")

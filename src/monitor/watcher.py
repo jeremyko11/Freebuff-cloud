@@ -98,8 +98,12 @@ class Watcher:
         lines = []
         wr = f"{pf['win_rate']:.0%}" if pf.get("win_rate") is not None else "-"
         pnl = pf.get("pnl") or 0.0
-        sign = "+" if pnl >= 0 else ""
-        pnl_s = f"{sign}${pnl:,.0f}"
+        if pnl > 0:
+            pnl_s = f"+${pnl:,.0f}"
+        elif pnl < 0:
+            pnl_s = f"-${-pnl:,.0f}"
+        else:
+            pnl_s = "$0"
         vol_s = f"${pf.get('volume') or 0:,.0f}"
         recent = f"{pf.get('recent_n') or 0}笔 · ${pf.get('recent_usdc') or 0:,.0f}"
         lines.append(f"📊 战绩：胜率{wr} · 盈亏{pnl_s} · 成交{vol_s}")
