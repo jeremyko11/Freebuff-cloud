@@ -181,7 +181,7 @@ class Store:
 
     # ---------------- wallets ----------------
 
-    def upsert_wallets(self, wallets: list) -> None:
+    def upsert_wallets(self, wallets: list, reset_inactive: bool = True) -> None:
         now = time.time()
         with self._lock, self._conn:
             for w in wallets:
@@ -214,8 +214,8 @@ class Store:
                         'auto_tags=excluded.auto_tags',
                         (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
                          w.closed_count, w.score, w.source, now, auto))
-            # 不在新名单里的标 inactive
-            if wallets:
+            # 不在新名单里的标 inactive（仅完整名单刷新时；增量发现(discover)不重置）
+            if reset_inactive and wallets:
                 addrs = [w.address for w in wallets]
                 placeholders = ",".join("?" * len(addrs))
                 self._conn.execute(

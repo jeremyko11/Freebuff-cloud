@@ -171,7 +171,7 @@ def cmd_discover(args) -> int:
         w.pnl = c.realized_pnl
         w.volume = c.volume
         w.extra = {"source_label": "小资金聪明钱", "note": c.market}
-        store.upsert_wallets([w])
+        store.upsert_wallets([w], reset_inactive=False)  # discover 增量，不动其他钱包 active
         try:
             store.compute_market_type(c.address)
         except Exception:
