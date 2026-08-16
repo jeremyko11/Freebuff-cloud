@@ -108,6 +108,21 @@ class RtdsWatcher:
             logger.warning("RTDS 信号处理失败 %s: %s", addr[:12], e)
 
     def _notify(self, s: Signal) -> None:
+        # 计算把握度：低把握不推送（减少噪音），高把握标注
+        conf = 100.0
+        try:
+            wr = None
+            row = self.store._conn.execute(
+                "SELECT win_rate FROM wallets WHERE address=?", (s.address,)).fetchone()
+            if row:
+                wr = row["win_rate"]
+            from src.smart.confidence import confidence, should_push, format_conf
+            conf = confidence(wr, s.price, s.usdc)
+            if not should_push(conf):
+                logger.info("低把握信号[跳过推送] %s %s %.0f分", s.wallet_name or s.address[:10], s.type, conf)
+                return
+        except Exception:
+            pass
         # 注入标签/市场分类（与轮询一致）
         try:
             auto, manual, _ = self.store.wallet_tags(s.address)
@@ -125,7 +140,10 @@ class RtdsWatcher:
                     s.wallet_name or s.address[:10], s.side, s.outcome, s.usdc,
                     s.price or 0, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
-            send_message(self.cfg.telegram, format_signal(s))
+            body = format_signal(s)
+            from src.smart.confidence import format_conf
+            body += "\n" + format_conf(conf)
+            send_message(self.cfg.telegram, body)
 
     def run_forever(self) -> None:
         self._refresh_targets()
