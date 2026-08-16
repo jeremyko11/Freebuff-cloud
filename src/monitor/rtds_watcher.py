@@ -139,9 +139,12 @@ class RtdsWatcher:
         except Exception:
             s.tags = []
         try:
+            from src.smart.market_tags import market_label, classify_slug
             market = self.store.get_market_type(s.address)
+            if not market:
+                # wallets.market_type 空时用信号 slug 现场分类兜底
+                market, _ = classify_slug(s.slug or "")
             if market:
-                from src.smart.market_tags import market_label
                 s.market_label = market_label(market)
         except Exception:
             pass
