@@ -123,6 +123,15 @@ class RtdsWatcher:
                 return
         except Exception:
             pass
+        # 多维过滤（市场/钱包/金额/来源）
+        try:
+            from src.smart.filter import should_push
+            ok, reason = should_push(s, self.store)
+            if not ok:
+                logger.info("过滤[跳过] %s %s: %s", s.wallet_name or s.address[:10], s.type, reason)
+                return
+        except Exception:
+            pass
         # 注入标签/市场分类（与轮询一致）
         try:
             auto, manual, _ = self.store.wallet_tags(s.address)

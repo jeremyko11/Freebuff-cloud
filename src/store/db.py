@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS market_categories (
     emoji TEXT,
     ord INTEGER
 );
+CREATE TABLE IF NOT EXISTS user_filters (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -263,6 +267,44 @@ class Store:
             row = self._conn.execute(
                 "SELECT * FROM wallets WHERE address=?", (address,)).fetchone()
         return dict(row) if row else None
+
+
+    # ---------------- user filters ----------------
+
+    def get_filter(self, key: str, default=None):
+        """读取一个用户筛选配置（JSON 字符串）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM user_filters WHERE key=?", (key,)).fetchone()
+        if not row:
+            return default
+        try:
+            import json
+            return json.loads(row["value"])
+        except Exception:
+            return row["value"]
+
+    def set_filter(self, key: str, value) -> None:
+        """保存一个用户筛选配置（转 JSON）。"""
+        import json
+        payload = json.dumps(value, ensure_ascii=False)
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO user_filters (key,value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, payload))
+
+    def all_filters(self) -> dict:
+        with self._lock:
+            rows = self._conn.execute("SELECT key,value FROM user_filters").fetchall()
+        import json
+        out = {}
+        for r in rows:
+            try:
+                out[r["key"]] = json.loads(r["value"])
+            except Exception:
+                out[r["key"]] = r["value"]
+        return out
 
     def wallet_tags(self, address_or_name: str) -> tuple[list[str], list[str], str | None]:
         """按地址精确 / 名称模糊查询，返回 (auto_tags, manual_tags, address)。"""
