@@ -81,12 +81,22 @@ class MonitorConfig:
 
 
 @dataclass
+class XConfig:
+    """X (Twitter) API：搜索社区推荐的 Polymarket 聪明钱。"""
+    bearer: str = os.environ.get("X_BEARER", "")
+    search_query: str = os.environ.get("X_SEARCH_QUERY",
+        "polymarket smart money whale -is:retweet")
+    max_results: int = _env_int("X_MAX_RESULTS", 20)
+
+
+@dataclass
 class Config:
     db_path: Path = Path(os.environ.get("FB_DB_PATH", "data/freebuff.db"))
     log_level: str = os.environ.get("FB_LOG_LEVEL", "INFO")
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     smart: SmartMoneyConfig = field(default_factory=SmartMoneyConfig)
     monitor: MonitorConfig = field(default_factory=MonitorConfig)
+    x: XConfig = field(default_factory=XConfig)
 
     def __post_init__(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

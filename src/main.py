@@ -506,6 +506,27 @@ def cmd_daily() -> int:
     return 0 if ok else 1
 
 
+def cmd_xdiscover() -> int:
+    """X 社交发现：搜索 Polymarket 聪明钱讨论，反查钱包加入名单。"""
+    from src.config import get_config
+    from src.store.db import Store
+    from src.smart.xdiscover import discover_x_smart
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    if not cfg.x.bearer:
+        print("未配置 X_BEARER（.env），先填入 X API Bearer/User Access Token")
+        return 1
+    print(f"X 搜索: {cfg.x.search_query}")
+    found = discover_x_smart(cfg, store)
+    if not found:
+        print("本轮未发现可映射钱包")
+        return 0
+    print(f"\nX 发现 {len(found)} 个可映射聪明钱：")
+    for f in found:
+        print(f"  @{f['twitter_user']:<20} -> {f['address'][:16]}...  {f['tweet_text'][:40]}")
+    return 0
+
+
 def cmd_rtds() -> int:
     """RTDS 实时推送监控（订阅全市场流过滤目标钱包，替代 2s 轮询）。"""
     import signal
@@ -545,6 +566,7 @@ def main() -> int:
     sub.add_parser("run", help="启动监控守护（默认）")
     sub.add_parser("rtds", help="RTDS 实时推送监控（亚秒级，替代2s轮询）")
     sub.add_parser("cmdbot", help="Telegram /filter 命令监听（筛选设置）")
+    sub.add_parser("xdiscover", help="X 社交发现聪明钱（需 X_BEARER）")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
     sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
@@ -598,6 +620,8 @@ def main() -> int:
         return cmd_backfill()
     if cmd == "daily":
         return cmd_daily()
+    if cmd == "xdiscover":
+        return cmd_xdiscover()
     if cmd == "cmdbot":
         return cmd_cmdbot()
     if cmd == "rtds":
