@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS wallets (
     updated_at REAL,
     auto_tags TEXT DEFAULT '',
     manual_tags TEXT DEFAULT '',
-    market_type TEXT DEFAULT ''
+    market_type TEXT DEFAULT '',
+    x_username TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,6 +101,9 @@ class Store:
         # 1) add missing columns on legacy db
         with self._lock, self._conn:
             sig_cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(signals)")]
+            w_cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(wallets)")]
+            if "x_username" not in w_cols:
+                self._conn.execute("ALTER TABLE wallets ADD COLUMN x_username TEXT DEFAULT ''")
             for col in ("market_category", "market_league", "wallet_source_type"):
                 if col not in sig_cols:
                     self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} TEXT")
@@ -190,30 +194,32 @@ class Store:
                     getattr(w, "win_rate", None), getattr(w, "profit_factor", None),
                     getattr(w, "closed_count", None), getattr(w, "score", None)))
                 src = getattr(w, "source", "")
+                x_username = (w.extra.get("x_username") if getattr(w, "extra", None) else "") or ""
                 is_store_sourced = (src == "manual" or str(src).startswith("community:"))
                 if is_store_sourced:
                     # 社区/手动/小资金钱包：不覆盖 pb为排行榜口径的 pnl/volume/score，避免冲掉本地统计
                     self._conn.execute(
                         'INSERT INTO wallets (address,name,pnl,volume,win_rate,profit_factor,'
-                        'closed_count,score,source,active,updated_at,auto_tags) '
-                        'VALUES (?,?,?,?,?,?,?,?,?,1,?,?) '
+                        'closed_count,score,source,active,updated_at,auto_tags,x_username) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?) '
                         'ON CONFLICT(address) DO UPDATE SET '
-                        'active=1, updated_at=excluded.updated_at, auto_tags=excluded.auto_tags',
+                        'active=1, updated_at=excluded.updated_at, auto_tags=excluded.auto_tags'
+                        + (', x_username=excluded.x_username' if x_username else ''),
                         (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
-                         w.closed_count, w.score, w.source, now, auto))
+                         w.closed_count, w.score, w.source, now, auto, x_username))
                 else:
                     self._conn.execute(
                         'INSERT INTO wallets (address,name,pnl,volume,win_rate,profit_factor,'
-                        'closed_count,score,source,active,updated_at,auto_tags) '
-                        'VALUES (?,?,?,?,?,?,?,?,?,1,?,?) '
+                        'closed_count,score,source,active,updated_at,auto_tags,x_username) '
+                        'VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?) '
                         'ON CONFLICT(address) DO UPDATE SET '
                         'name=excluded.name, pnl=excluded.pnl, volume=excluded.volume, '
                         'win_rate=excluded.win_rate, profit_factor=excluded.profit_factor, '
                         'closed_count=excluded.closed_count, score=excluded.score, '
                         'source=excluded.source, active=1, updated_at=excluded.updated_at, '
-                        'auto_tags=excluded.auto_tags',
+                        'auto_tags=excluded.auto_tags, x_username=excluded.x_username',
                         (w.address, w.name, w.pnl, w.volume, w.win_rate, w.profit_factor,
-                         w.closed_count, w.score, w.source, now, auto))
+                         w.closed_count, w.score, w.source, now, auto, x_username))
             # 不在新名单里的标 inactive（仅完整名单刷新时；增量发现(discover)不重置）
             if reset_inactive and wallets:
                 addrs = [w.address for w in wallets]

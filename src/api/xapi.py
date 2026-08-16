@@ -67,3 +67,28 @@ class XClient:
             for m in re.finditer(r"@([A-Za-z0-9_]+)", text):
                 users.add(m.group(1).lower())
         return list(users)
+
+
+def oauth2_bearer(client_id: str, client_secret: str) -> str:
+    """用 OAuth2 Client Credentials 换 app-only Bearer Token。"""
+    import requests as _r
+    r = _r.post("https://api.twitter.com/oauth2/token",
+                data={"grant_type": "client_credentials"},
+                auth=(client_id, client_secret), timeout=15)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def user_auth_url(client_id: str, redirect_uri: str = "oob") -> str:
+    """生成 OAuth2 用户授权 URL（用于获取 User Access Token，能搜推文）。"""
+    from urllib.parse import urlencode
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "tweet.read users.read",
+        "state": "pm_x",
+        "code_challenge": "challenge",
+        "code_challenge_method": "plain",
+    }
+    return "https://twitter.com/i/oauth2/authorize?" + urlencode(params)

@@ -105,6 +105,8 @@ def _seed_from_leaderboards(cfg: SmartMoneyConfig) -> dict[str, Wallet]:
                         volume=e["volume"],
                         source=src,
                     )
+                    if e.get("xUsername"):
+                        w.extra["x_username"] = e["xUsername"]
                     candidates[addr] = w
                 else:
                     # 多榜命中：取最优 PnL，来源累记

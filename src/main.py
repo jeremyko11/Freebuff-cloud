@@ -73,7 +73,8 @@ def cmd_status() -> int:
         name = w["name"] or w["address"][:16]
         mt = w.get("market_type") or ""
         mt_s = f" {market_emoji(mt)}{mt}" if mt else ""
-        print(f"  {w['score']:>5.1f} | {wr:>4} | {_sign_usd(w['pnl'] or 0):>12} | {name:<24} {_fmt_tags(auto, manual)}{mt_s}")
+        x_s = f" @{w.get('x_username') or ''}" if w.get('x_username') else ""
+        print(f"  {w['score']:>5.1f} | {wr:>4} | {_sign_usd(w['pnl'] or 0):>12} | {name:<24} {_fmt_tags(auto, manual)}{mt_s}{x_s}")
     import time
     with store._conn:
         n_signals = store._conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
