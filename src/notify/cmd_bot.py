@@ -17,7 +17,7 @@ from src.smart.filter import DEFAULT_FILTER
 
 logger = logging.getLogger(__name__)
 
-MARKETS = ["足球", "网球", "棒球", "电竞", "橄榄球", "篮球", "搏击", "加密", "政治"]
+MARKETS = ["足球", "网球", "棒球", "电竞", "橄榄球", "篮球", "搏击", "加密", "政治", "娱乐", "经济", "天气", "其他"]
 SOURCES = ["排行榜", "社区", "小资金", "手动"]
 _stop = threading.Event()
 

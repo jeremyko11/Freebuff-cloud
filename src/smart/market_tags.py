@@ -18,6 +18,9 @@ _CODE_SPORT = {
     "fin1": "足球", "es": "足球", "es2": "足球", "chl": "足球", "chl2": "足球",
     "mls": "足球", "usl": "足球", "uslc": "足球", "bl": "足球", "bl2": "足球",
     "frtc": "足球", "ncaa": "足球",
+    "den": "足球", "nor": "足球", "swe": "足球", "mex": "足球",
+    "ecs": "足球", "hun": "足球", "kor": "足球", "gtm": "足球",
+    "aze1": "足球", "elc": "足球", "csl": "足球", "irl": "足球", "sco": "足球",
     # 棒球
     "mlb": "棒球",
     # 橄榄球
@@ -25,9 +28,12 @@ _CODE_SPORT = {
     # 篮球
     "wnba": "篮球", "wnb": "篮球",
     # 网球
-    "atp": "网球", "wta": "网球",
+    "atp": "网球", "wta": "网球", "itf": "网球",
     # 电竞
     "lol": "电竞", "cs": "电竞", "cs2": "电竞", "val": "电竞",
+    "dota": "电竞", "dota2": "电竞", "r6": "电竞", "sf6": "电竞",
+    "valorant": "电竞", "overwatch": "电竞", "rocket": "电竞",
+    "starcraft": "电竞", "hs": "电竞", "fifa": "电竞", "mobile": "电竞",
     # 搏击
     "ufc": "搏击",
 }
@@ -52,7 +58,10 @@ def slug_to_sport(slug: str) -> str | None:
     code = slug.split("-", 1)[0] if slug else ""
     if code and code in _CODE_SPORT:
         return _CODE_SPORT[code]
-    # 加密 / 政治：关键词命中
+    # 关键词大类（加密/政治/娱乐/经济/天气...）：以 _KEYWORD_LEAGUE 为源
+    for cat, kws in _KEYWORD_LEAGUE.items():
+        if any(k in slug for k in kws):
+            return cat
     if any(k in slug for k in _CRYPTO_KEYWORDS):
         return "加密"
     if any(k in slug for k in _POLITICS_KEYWORDS):
@@ -116,12 +125,20 @@ _CODE_LEAGUE = {
     "atp": "ATP", "wta": "WTA",
     "lol": "英雄联盟", "cs": "CS", "cs2": "CS2", "val": "瓦罗兰特",
     "ufc": "UFC",
+    "den": "丹超", "nor": "挪超", "swe": "瑞超", "mex": "墨超",
+    "ecs": "哥甲", "hun": "匈甲", "kor": "K联赛", "gtm": "危甲",
+    "aze1": "阿塞超", "elc": "英冠", "dota2": "Dota2", "itf": "ITF",
 }
 
 _KEYWORD_LEAGUE = {
     "加密": ("bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "crypto", "doge", "price-of-", "biden"),
     "政治": ("politics", "election", "trump", "president", "senate", "congress", "house", "prime-minister", "invade"),
-    "娱乐": ("oscar", "movie", "film", "box-office", "grammy", "spotify"),
+    "娱乐": ("oscar", "movie", "film", "box-office", "grammy", "spotify",
+              "america", "music", "award", "celebrity", "game-of-the-year"),
+    "经济": ("fed", "interest-rate", "cpi", "inflation", "recession", "gdpp",
+              "unemployment", "rates", "fed-funds", "tariffs", "gdp"),
+    "天气": ("temperature", "hurricane", "snow", "heat", "weather", "rain",
+              "record-high", "degrees", "tropical"),
 }
 
 
