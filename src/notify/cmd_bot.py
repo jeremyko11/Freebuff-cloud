@@ -51,20 +51,21 @@ def _save_flt(store, flt):
 
 
 def _market_keyboard(flt):
-    """市场分类开关按钮（toggle blocked）。"""
     rows = []
     for m in MARKETS:
         status = "🔴" if m in flt["blocked_markets"] else "🟢"
         rows.append([{"text": f"{status} {m}", "callback_data": f"mk:{m}"}])
+    rows.append([{"text": "⬅️ 返回主页", "callback_data": "menu:home"}])
     return rows
 
 
 def _src_keyboard(flt):
     rows = []
-    for s in SOURCES:
-        on = flt["enabled_sources"].get(s, 1)
+    for src in SOURCES:
+        on = flt["enabled_sources"].get(src, 1)
         status = "🟢" if on else "⚪"
-        rows.append([{"text": f"{status} {s}", "callback_data": f"src:{s}"}])
+        rows.append([{"text": f"{status} {src}", "callback_data": f"src:{src}"}])
+    rows.append([{"text": "⬅️ 返回主页", "callback_data": "menu:home"}])
     return rows
 
 
@@ -72,7 +73,8 @@ def _main_keyboard():
     return [
         [{"text": "🎫 市场分类", "callback_data": "menu:markets"}],
         [{"text": "📡 来源开关", "callback_data": "menu:sources"}],
-        [{"text": "🔽 金额门槛", "callback_data": "menu:money"}],
+        [{"text": "💰 金额门槛", "callback_data": "menu:money"}],
+        [{"text": "👛 白名单钱包", "callback_data": "menu:wallets"}],
         [{"text": "🔁 重置默认", "callback_data": "menu:reset"}],
     ]
 
@@ -83,18 +85,33 @@ def _money_keyboard(flt):
     for m in opts:
         mark = "✓" if flt.get("min_usdc", 200) == m else ""
         rows.append([{"text": f"${m} {mark}", "callback_data": f"money:{m}"}])
+    rows.append([{"text": "⬅️ 返回主页", "callback_data": "menu:home"}])
     return rows
 
 
-def _show_filter(cfg, chat_id, flt):
-    text = (
-        "🎛️ 推送过滤设置\n\n"
-        f"屏蔽市场: {', '.join(flt['blocked_markets']) or '无'}\n"
-        f"只收市场: {', '.join(flt['allowed_markets']) or '全部'}\n"
+def _wallet_keyboard(flt):
+    ws = flt.get("allowed_wallets") or []
+    rows = [[{"text": f"👛 当前白名单 {len(ws)} 个", "callback_data": "wallet:info"}]]
+    if ws:
+        rows.append([{"text": "🗑 清空白名单", "callback_data": "wallet:clear"}])
+    rows.append([{"text": "⬅️ 返回主页", "callback_data": "menu:home"}])
+    return rows
+
+
+def _filter_summary(flt) -> str:
+    ws = flt.get("allowed_wallets") or []
+    return (
+        "🎛️ 推送过滤\n\n"
+        f"屏蔽市场: {', '.join(flt.get('blocked_markets') or []) or '—'}\n"
+        f"只收市场: {', '.join(flt.get('allowed_markets') or []) or '全部'}\n"
         f"金额门槛: ${flt.get('min_usdc',200)}\n"
-        f"来源开关: {', '.join(k for k,v in flt['enabled_sources'].items() if not v) or '全开'}\n"
-        "（🟢=接收 🔴=屏蔽）"
+        f"白名单: {len(ws)} 个钱包\n"
+        f"来源关闭: {', '.join(k for k,v in (flt.get('enabled_sources') or {}).items() if not v) or '全开'}"
     )
+
+
+def _show_filter(cfg, chat_id, flt):
+    text = _filter_summary(flt) + "\n\n（🟢=接收 🔴=屏蔽）"
     _send(cfg, "sendMessage", chat_id=chat_id, text=text, reply_markup={"inline_keyboard": _main_keyboard()})
 
 
@@ -130,6 +147,21 @@ def _handle_cmd(cfg, store, msg):
         flt["blocked_markets"] = []
         _save_flt(store, flt)
         _send(cfg, "sendMessage", chat_id=chat, text=f"✅ 只收市场: {args or '全部'}")
+    elif cmd in ("wallet", "w"):
+        addr = args.strip()
+        allowed = flt.get("allowed_wallets") or []
+        if addr:
+            a = addr.lower()
+            if a and a not in allowed:
+                allowed.append(a)
+                _send(cfg, "sendMessage", chat_id=chat, text=f"✅ 已加入白名单: {addr[:14]}...")
+            else:
+                _send(cfg, "sendMessage", chat_id=chat, text="❌ 地址无效或已存在")
+        else:
+            _send(cfg, "sendMessage", chat_id=chat,
+                  text=f"当前白名单 {len(allowed)} 个: {', '.join(allowed) or '无'}\n用 /filter wallet 0x地址 添加")
+        flt["allowed_wallets"] = allowed
+        _save_flt(store, flt)
     elif cmd == "min":
         try:
             m = int(args)
@@ -153,10 +185,14 @@ def _handle_callback(cfg, store, cb):
     flt = _load_flt(store)
     if data.startswith("menu:"):
         menu = data.split(":")[1]
-        if menu == "markets":
+        if menu == "home":
+            _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
+                  text=_filter_summary(flt), reply_markup={"inline_keyboard": _main_keyboard()})
+            _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text="")
+        elif menu == "markets":
             kb = _market_keyboard(flt)
             _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
-                  text="🎫 点选市场开关（屏蔽/接收）", reply_markup={"inline_keyboard": kb})
+                  text="🎫 市场分类（点⚪/🔴切换屏蔽）", reply_markup={"inline_keyboard": kb})
         elif menu == "sources":
             kb = _src_keyboard(flt)
             _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
@@ -165,9 +201,17 @@ def _handle_callback(cfg, store, cb):
             kb = _money_keyboard(flt)
             _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
                   text=f"💰 金额门槛（当前 ${flt.get('min_usdc',200)}）", reply_markup={"inline_keyboard": kb})
+        elif menu == "wallets":
+            kb = _wallet_keyboard(flt)
+            ws = flt.get("allowed_wallets") or []
+            _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
+                  text="👛 白名单钱包（当前 %d 个）\n使用: /filter wallet 0x地址 添加" % len(ws),
+                  reply_markup={"inline_keyboard": kb})
         elif menu == "reset":
             _save_flt(store, DEFAULT_FILTER)
-            _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text="已重置默认")
+            _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text="已重置默认（全收）")
+            _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
+                  text=_filter_summary(DEFAULT_FILTER), reply_markup={"inline_keyboard": _main_keyboard()})
     elif data.startswith("mk:"):
         m = data.split(":", 1)[1]
         if m in flt["blocked_markets"]:
@@ -185,6 +229,18 @@ def _handle_callback(cfg, store, cb):
         _send(cfg, "editMessageReplyMarkup", chat_id=chat, message_id=msg.get("message_id"),
               reply_markup={"inline_keyboard": _src_keyboard(flt)})
         _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text=f"{s}: {'开' if flt['enabled_sources'].get(s) else '关'}")
+    elif data.startswith("wallet:"):
+        act = data.split(":")[1]
+        if act == "toggle":
+            ws = flt.get("allowed_wallets") or []
+            flt["allowed_wallets"] = []
+            _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text="已改回全收")
+        elif act == "clear":
+            flt["allowed_wallets"] = []
+            _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text="已清空白名单")
+        _save_flt(store, flt)
+        _send(cfg, "editMessageReplyMarkup", chat_id=chat, message_id=msg.get("message_id"),
+              reply_markup={"inline_keyboard": _wallet_keyboard(flt)})
     elif data.startswith("money:"):
         m = int(data.split(":")[1])
         flt["min_usdc"] = m
