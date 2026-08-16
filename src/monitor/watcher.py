@@ -187,20 +187,6 @@ class Watcher:
             body = format_signal(s)
             if perf:
                 body += "\n" + "\n".join(self._perf_lines(perf))
-            # 今日盈亏估算（当前价 vs 买入价，仅在可估算时展示）
-            try:
-                tpnl = self.store.wallet_today_pnl(s.address)
-                if tpnl["n_estimated"] > 0:
-                    amt = tpnl["total_pnl"]
-                    if amt > 0:
-                        pnl_s = f"+${amt:,.0f}"
-                    elif amt < 0:
-                        pnl_s = f"-${-amt:,.0f}"
-                    else:
-                        pnl_s = "$0"
-                    body += f"\n📈 今日盈亏估算：{pnl_s}（{tpnl['win_count']}赢/{tpnl['loss_count']}亏，估{tpnl['n_estimated']}笔）"
-            except Exception:
-                pass
             if src_label:
                 body += "\n🔗 来自 " + src_label + " 推荐"
             send_message(self.cfg.telegram, body)
