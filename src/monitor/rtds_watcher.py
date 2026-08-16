@@ -62,6 +62,21 @@ class RtdsWatcher:
         if usdc < self.cfg.monitor.min_signal_usdc:
             return None
         cid = t.get("conditionId") or ""
+        outcome = t.get("outcome") or ""
+        title = t.get("title") or ""
+        slug = t.get("slug") or ""
+        # 缺市场字段时用 asset 反查补全（APP/REDEEM 等成交常不带）
+        if (not cid or not slug) and t.get("asset"):
+            try:
+                from src.api.rtds import lookup_market_by_asset
+                info = lookup_market_by_asset(str(t["asset"]))
+                if info:
+                    cid = cid or info.get("conditionId") or ""
+                    slug = slug or info.get("slug") or ""
+                    title = title or info.get("title") or ""
+                    outcome = outcome or info.get("outcome") or ""
+            except Exception:
+                pass
         # OPEN/ADD/REDUCE
         if side == "SELL":
             stype = "REDUCE"
@@ -73,7 +88,7 @@ class RtdsWatcher:
                     "INSERT OR IGNORE INTO wallet_markets (address, condition_id, first_seen) VALUES (?,?,?)",
                     (addr, cid, ts_sec or time.time()))
                 self.store._conn.commit()
-        key = f"{addr}:{cid}:{t.get('outcome') or ''}:{side}:{_hour_bucket(ts_sec)}"
+        key = f"{addr}:{cid}:{outcome}:{side}:{_hour_bucket(ts_sec)}"
         if self.store.signal_seen(key, self.cfg.monitor.dedup_window_sec):
             return None
         name = t.get("name") or t.get("pseudonym") or addr[:10]
@@ -83,9 +98,9 @@ class RtdsWatcher:
             type=stype,
             side=side,
             conditionId=cid,
-            outcome=t.get("outcome") or "",
-            title=t.get("title") or "",
-            slug=t.get("slug") or "",
+            outcome=outcome,
+            title=title,
+            slug=slug,
             asset=t.get("asset") or "",
             usdc=usdc,
             price=price,

@@ -102,3 +102,55 @@ class RtdsClient:
             pass
         if self._thread:
             self._thread.join(timeout=3)
+
+
+# ======================================================================
+# asset(clob token id) -> 市场信息 反查（补全 RTDS 缺失字段）
+# ======================================================================
+_asset_cache: dict = {}
+
+
+def lookup_market_by_asset(asset: str) -> dict:
+    """用 clob token id 反查市场信息（slug/conditionId/outcome/title）。
+    带内存缓存。失败返回空 dict。"""
+    if not asset:
+        return {}
+    if asset in _asset_cache:
+        return _asset_cache[asset]
+    import json as _json
+    import urllib.parse
+    from src.api.data_api import _get_session
+    try:
+        url = "https://gamma-api.polymarket.com/markets?" + urllib.parse.urlencode({"clob_token_ids": asset})
+        resp = _get_session().get(url, timeout=8)
+        if resp.status_code != 200:
+            return {}
+        data = resp.json()
+        if not data:
+            return {}
+        m = data[0]
+        outcomes = m.get("outcomes") or []
+        token_ids = m.get("clobTokenIds") or []
+        if isinstance(outcomes, str):
+            try: outcomes = _json.loads(outcomes)
+            except Exception: outcomes = []
+        if isinstance(token_ids, str):
+            try: token_ids = _json.loads(token_ids)
+            except Exception: token_ids = []
+        token_ids = [str(t) for t in token_ids]
+        # 找 asset 在 token_ids 的索引 → 对应 outcome
+        outcome = ""
+        if asset in token_ids:
+            idx = token_ids.index(asset)
+            if idx < len(outcomes):
+                outcome = str(outcomes[idx])
+        info = {
+            "slug": m.get("slug") or "",
+            "conditionId": m.get("conditionId") or "",
+            "title": m.get("question") or "",
+            "outcome": outcome,
+        }
+        _asset_cache[asset] = info
+        return info
+    except Exception:
+        return {}

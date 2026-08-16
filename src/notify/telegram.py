@@ -67,8 +67,8 @@ def format_signal(s: Signal) -> str:
     who = s.wallet_name or f"{s.address[:8]}…{s.address[-4:]}"
     if getattr(s, "tags", None):
         who = f"{who} 「{'·'.join(with_emoji(t) for t in s.tags)}」"
-    title = s.title or s.conditionId[:16]
-    url = f"https://polymarket.com/market/{s.slug}" if s.slug else ""
+    title = s.title or (s.conditionId[:16] if s.conditionId else "（未知市场）")
+    url = f"https://polymarket.com/market/{s.slug}" if (s.slug and s.slug.strip()) else ""
     lines = [
         f"{emoji} <b>[{type_label}]</b> {who}",
     ]
