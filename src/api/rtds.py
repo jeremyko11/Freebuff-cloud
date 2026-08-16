@@ -1,0 +1,104 @@
+"""Polymarket RTDS 实时数据客户端（ws-live-data.polymarket.com）。
+
+订阅 activity/trades（全局每笔成交，免鉴权），payload 含 proxyWallet。
+自动重连，回调式将每笔成交交给 handler(address, trade)。
+"""
+import json
+import logging
+import threading
+import time
+
+import websocket
+
+logger = logging.getLogger(__name__)
+
+RTDS_URL = "wss://ws-live-data.polymarket.com"
+
+
+class RtdsClient:
+    def __init__(self, on_trade=None, on_status=None):
+        """on_trade(address, trade_dict)；on_status(str)。均为可选回调。"""
+        self.on_trade = on_trade
+        self.on_status = on_status
+        self._ws = None
+        self._stop = threading.Event()
+        self._thread = None
+        self._connected = False
+
+    def _status(self, msg):
+        if self.on_status:
+            try:
+                self.on_status(msg)
+            except Exception:
+                pass
+
+    def _connect(self):
+        self._ws = websocket.create_connection(RTDS_URL, timeout=20)
+        sub = {"action": "subscribe", "subscriptions": [{"topic": "activity", "type": "trades", "filters": ""}]}
+        self._ws.send(json.dumps(sub))
+        self._connected = True
+        self._status("connected")
+
+    def _handle_msg(self, raw):
+        if not raw:
+            return
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            return
+        if isinstance(obj, dict) and obj.get("payload"):
+            payload = obj["payload"]
+            addr = (payload.get("proxyWallet") or "").lower()
+            if addr and self.on_trade:
+                self.on_trade(addr, payload)
+
+    def _run(self):
+        self._status("starting")
+        while not self._stop.is_set():
+            try:
+                if self._ws is None:
+                    self._connect()
+                self._ws.settimeout(1)
+                try:
+                    data = self._ws.recv()
+                    if data:
+                        self._handle_msg(data)
+                except websocket.WebSocketTimeoutException:
+                    # 心跳：RTDS 建议每 5s PING
+                    try:
+                        self._ws.ping("")
+                    except Exception:
+                        pass
+                    continue
+                except websocket.WebSocketConnectionClosedException:
+                    self._connected = False
+                    self._status("disconnected")
+                    self._ws = None
+                    # 退避重连
+                    time.sleep(2)
+                except Exception:
+                    self._connected = False
+                    self._ws = None
+                    time.sleep(2)
+            except Exception as e:
+                logger.warning("RTDS 异常: %s", e)
+                self._connected = False
+                time.sleep(2)
+        self._status("stopped")
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        try:
+            if self._ws:
+                self._ws.close()
+        except Exception:
+            pass
+        if self._thread:
+            self._thread.join(timeout=3)

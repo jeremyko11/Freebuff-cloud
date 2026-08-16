@@ -506,6 +506,18 @@ def cmd_daily() -> int:
     return 0 if ok else 1
 
 
+def cmd_rtds() -> int:
+    """RTDS 实时推送监控（订阅全市场流过滤目标钱包，替代 2s 轮询）。"""
+    import signal
+    from src.config import get_config
+    from src.monitor.rtds_watcher import RtdsWatcher, _handle_sig
+    cfg = get_config()
+    signal.signal(signal.SIGINT, _handle_sig)
+    signal.signal(signal.SIGTERM, _handle_sig)
+    RtdsWatcher(cfg).run_forever()
+    return 0
+
+
 def cmd_run() -> int:
     from src.monitor.watcher import Watcher
     cfg = get_config()
@@ -521,6 +533,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="freebuff", description="Polymarket 聪明钱跟踪 bot")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("run", help="启动监控守护（默认）")
+    sub.add_parser("rtds", help="RTDS 实时推送监控（亚秒级，替代2s轮询）")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
     sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
@@ -574,6 +587,8 @@ def main() -> int:
         return cmd_backfill()
     if cmd == "daily":
         return cmd_daily()
+    if cmd == "rtds":
+        return cmd_rtds()
     if cmd == "run":
         return cmd_run()
     if cmd == "seed":
