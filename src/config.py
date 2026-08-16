@@ -66,7 +66,7 @@ class SmartMoneyConfig:
 
 @dataclass
 class MonitorConfig:
-    poll_interval_sec: int = _env_int("MON_POLL_INTERVAL_SEC", 300)  # 全名单轮询周期
+    poll_interval_sec: int = _env_int("MON_POLL_INTERVAL_SEC", 2)  # 全名单轮询周期
     activity_limit: int = _env_int("MON_ACTIVITY_LIMIT", 100)
     # 信号金额门槛：低于此值的单笔成交不报
     min_signal_usdc: float = _env_float("MON_MIN_SIGNAL_USDC", 200.0)
