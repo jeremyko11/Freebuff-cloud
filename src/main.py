@@ -565,7 +565,7 @@ def cmd_weatherdiscover() -> int:
     store = Store(cfg.db_path)
     wl_path = cfg.smart.watchlist_path
     print("开始天气聪明钱发现...")
-    found = discover_weather_smart(budget_wallets=20)
+    found = discover_weather_smart(budget_wallets=50)
     if not found:
         print("本轮未筛出天气聪明钱（天气市场盈利者少）")
         return 0

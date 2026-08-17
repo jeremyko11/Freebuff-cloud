@@ -43,7 +43,7 @@ def _find_weather_slugs(limit_page: int = 5) -> list[str]:
     return list(slugs.keys())
 
 
-def discover_weather_smart(budget_wallets: int = 20) -> list[dict]:
+def discover_weather_smart(budget_wallets: int = 50) -> list[dict]:
     """发现天气市场里的活跃/盈利聪明钱。
 
     返回 [{address, name, realized_pnl, volume, markets}]。
@@ -51,7 +51,7 @@ def discover_weather_smart(budget_wallets: int = 20) -> list[dict]:
     slugs = _find_weather_slugs()
     logger.info("发现天气市场 %d 个: %s", len(slugs), slugs[:3])
     wallet_pool = {}
-    for slug in slugs[:8]:
+    for slug in slugs[:30]:
         try:
             trades = data_api.fetch_trades_by_slug(slug, limit=200)
             for t in trades:
