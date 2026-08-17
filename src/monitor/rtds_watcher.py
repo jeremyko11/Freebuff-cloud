@@ -7,6 +7,7 @@
   - usdc = size * price
 """
 import logging
+import os
 import threading
 import time
 
@@ -183,6 +184,7 @@ class RtdsWatcher:
             from src.smart.confidence import format_conf
             body += "\n" + format_conf(conf)
             send_message(self.cfg.telegram, body)
+            self._touch_push()
 
     def run_forever(self) -> None:
         self._refresh_targets()
@@ -190,15 +192,56 @@ class RtdsWatcher:
         client = RtdsClient(on_trade=self._on_trade, on_status=lambda m: logger.info("RTDS %s", m))
         client.start()
         last_refresh = time.time()
+        # 静默告警：记录最后成功推送时间
+        last_push_ts = time.time()
+        last_alert_ts = 0.0
+        self._ever_pushed = False
         while not _stop.is_set():
+            now = time.time()
+            # WatchdogSec 喂狗（systemd 检测服务存活）
+            _sd_notify()
+            # 静默告警：超过 10 分钟无推送 → Telegram 提醒
+            if now - last_push_ts > 600:
+                if now - last_alert_ts > 600:  # 去抖：10 分钟一条
+                    try:
+                        msg = ("⚠️ RTDS 静默告警：已 %d 分钟无推送\n可能原因：Polymarket 数据流静默 / RTDS 连接挂起\nsystemd 与 120s 自救已兜底，若持续请检查日志。" % int((now - last_push_ts) / 60))
+                        if self.cfg.telegram.enabled:
+                            send_message(self.cfg.telegram, msg)
+                        logger.warning("RTDS 静默告警已发送（%d 分钟无推送）", int((now - last_push_ts) / 60))
+                    except Exception as e:
+                        logger.warning("RTDS 静默告警发送失败: %s", e)
+                    last_alert_ts = now
             # 定期刷新目标钱包（名单可能更新）
-            if time.time() - last_refresh > 1800:
+            if now - last_refresh > 1800:
                 self._refresh_targets()
-                last_refresh = time.time()
+                last_refresh = now
             time.sleep(5)
         client.stop()
         logger.info("RTDS 监控已停止")
 
+    def _touch_push(self) -> None:
+        """记录一次成功推送（供静默告警使用）。"""
+        self.last_push_ts = time.time()
+        if getattr(self, "_ever_pushed", False) is False:
+            self._ever_pushed = True
+            logger.info("RTDS 首次推送已记录，静默告警启用")
+
 
 def _handle_sig(signum, frame):
     _stop.set()
+
+
+def _sd_notify(state: str = "WATCHDOG=1") -> None:
+    """systemd sd_notify 喂狗：NOTIFY_SOCKET 存在时发送心跳。"""
+    sock = os.environ.get("NOTIFY_SOCKET")
+    if not sock:
+        return
+    try:
+        import socket as _sock
+        fam = _sock.AF_UNIX
+        addr = sock if sock.startswith("/") else f"/run/systemd/notify"
+        s = _sock.socket(fam, _sock.SOCK_DGRAM)
+        s.sendto(state.encode(), addr, )  # noqa: E501
+        s.close()
+    except Exception:
+        pass
