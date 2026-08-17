@@ -507,6 +507,35 @@ def cmd_daily() -> int:
     return 0 if ok else 1
 
 
+def cmd_globaldiscover() -> int:
+    """全局活跃交易者发现：补充排行榜外的盈利聪明钱。"""
+    from src.config import get_config
+    from src.store.db import Store
+    from src.smart import watchlist
+    from src.smart.discovery import Wallet
+    from src.smart.global_discover import discover_global_smart
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    existing = set(r["address"] for r in store._conn.execute("SELECT address FROM wallets WHERE active=1"))
+    print(f"全局发现（已知 {len(existing)}）...")
+    found = discover_global_smart(budget=20, existing=existing, sample_pages=8)
+    if not found:
+        print("本轮无新发现")
+        return 0
+    added = 0
+    for c in found:
+        addr = c["address"]
+        watchlist.add(cfg.smart.watchlist_path, addr, source="global",
+                      note=f"全局活跃盈利 real+${c['realized_pnl']:.0f}")
+        w = Wallet(address=addr, name=c["name"], source="community:global")
+        w.pnl = c["realized_pnl"]; w.volume = c["volume"]
+        store.upsert_wallets([w], reset_inactive=False)
+        added += 1
+        print(f"  ✅ {c['name'] or addr[:12]} +${c['realized_pnl']:,.0f}")
+    print(f"新增 {added} 个")
+    return 0
+
+
 def cmd_weatherdiscover() -> int:
     """发现天气市场聪明钱，加入观察名单（source=weather）。"""
     from src.config import get_config
@@ -598,6 +627,7 @@ def main() -> int:
     sub.add_parser("cmdbot", help="Telegram /filter 命令监听（筛选设置）")
     sub.add_parser("xdiscover", help="X 社交发现聪明钱（需 X_BEARER）")
     sub.add_parser("weatherdiscover", help="发现天气市场聪明钱")
+    sub.add_parser("globaldiscover", help="发现全局活跃盈利交易者")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
     sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
@@ -651,6 +681,8 @@ def main() -> int:
         return cmd_backfill()
     if cmd == "daily":
         return cmd_daily()
+    if cmd == "globaldiscover":
+        return cmd_globaldiscover()
     if cmd == "weatherdiscover":
         return cmd_weatherdiscover()
     if cmd == "xdiscover":
