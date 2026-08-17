@@ -91,6 +91,104 @@ def check_social_signals(topics: list[str] = None) -> list[dict]:
     return signals
 
 
+GAMMA_API = "https://gamma-api.polymarket.com/markets"
+_mkt_cache = {"ts": 0, "markets": {}}
+_MKT_TTL = 300  # 5 分钟缓存
+_KEYWORD_TAG = {
+    "bitcoin": "crypto", "ethereum": "crypto", "polymarket": "crypto",
+    "prediction market": "crypto", "interest rate": "economics",
+    "fed": "economics", "recession": "economics", "iran": "geopolitics",
+    "war": "geopolitics", "hurricane": "weather", "yangzhou": "politics",
+    "trump": "us-elections", "us election": "us-elections",
+}
+
+
+def _keyword_tokens(kw: str) -> list[str]:
+    """把话题关键词映射为市场标题检索 token（bitcoin->btc 等）。"""
+    aliases = {
+        "bitcoin": ["bitcoin", "btc"],
+        "ethereum": ["ethereum", "eth"],
+        "polymarket": ["polymarket"],
+        "prediction market": ["prediction"],
+        "trump": ["trump"],
+        "us election": ["election"],
+        "iran": ["iran"],
+        "war": ["war"],
+        "interest rate": ["interest rate", "fed rate"],
+        "fed": ["fed", "rate"],
+        "recession": ["recession"],
+        "hurricane": ["hurricane", "storm"],
+        "yangzhou": ["yangzhou"],
+    }
+    return aliases.get(kw.lower(), [kw.lower()])
+
+
+def _fetch_open_markets(tag: str) -> list[dict]:
+    """拉某 tag 在盘高成交量市场（带缓存），返回轻量 dict 列表。"""
+    import urllib.parse
+    key = tag or "all"
+    now = time.time()
+    cached = _mkt_cache["markets"].get(key)
+    if cached and now - _mkt_cache["ts"] < _MKT_TTL:
+        return cached
+    params = {"closed": "false", "order": "volume",
+              "ascending": "false", "limit": 100}
+    if tag:
+        params["tag_slug"] = tag
+    try:
+        qs = urllib.parse.urlencode(params)
+        r = requests.get(f"{GAMMA_API}?{qs}",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+        rows = r.json() if r.status_code == 200 else []
+        out = []
+        for m in rows:
+            if not m.get("question"):
+                continue
+            try:
+                vol = float(m.get("volume") or 0)
+            except (TypeError, ValueError):
+                vol = 0
+            try:
+                price = float((m.get("outcomePrices") or [0.5, 0.5])[0])
+            except (TypeError, ValueError):
+                price = 0.5
+            out.append({"question": m["question"], "slug": m.get("slug"),
+                        "volume": vol, "price": price})
+        _mkt_cache["markets"][key] = out
+        _mkt_cache["ts"] = now
+        return out
+    except Exception as e:
+        logger.warning("gamma 拉市场失败: %s", e)
+        return []
+
+
+def find_related_markets(keyword: str, n: int = 3) -> list[dict]:
+    """按话题关键词，从在盘市场中挑标题命中的，返回 n 个（带缓存）。"""
+    tokens = _keyword_tokens(keyword)
+    if not tokens:
+        return []
+    tag = _KEYWORD_TAG.get(keyword.lower())
+    # 先取专用 tag 的市场池，再补通用池，合并后按 token 命中
+    pool = _fetch_open_markets(tag) + _fetch_open_markets(None)
+    seen = set()
+    hits = []
+    for m in pool:
+        if m["slug"] in seen:
+            continue
+        seen.add(m["slug"])
+        import re
+        q = (m.get("question") or "").lower()
+        hit = False
+        for t in tokens:
+            if re.search(r"\b" + re.escape(t) + r"\b", q):
+                hit = True
+                break
+        if hit:
+            hits.append(m)
+    hits.sort(key=lambda h: h["volume"], reverse=True)
+    return hits[:n]
+
+
 def format_social_signal(sig: dict) -> str:
     if sig.get("type") == "热度突增":
         return (f"🔥 <b>[社交热度突增]</b> {sig['keyword']}\n提及 {sig['posts']:,} "

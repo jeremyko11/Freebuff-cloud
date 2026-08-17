@@ -518,8 +518,23 @@ def cmd_socialpulse() -> int:
     if not sigs:
         print("无社交信号变化")
         return 0
+    from src.smart.social_pulse import find_related_markets
     for sig in sigs:
         text = format_social_signal(sig)
+        kw = sig.get("keyword", "")
+        if kw:
+            related = find_related_markets(kw, n=3)
+            if related:
+                text += "\n\n🎯 相关在盘市场："
+                link_txt = []
+                for m in related:
+                    u = f"https://polymarket.com/market/{m['slug']}"
+                    # 标题可能很长，截断增强可读性
+                    q = m["question"]
+                    if len(q) > 60:
+                        q = q[:60] + "…"
+                    link_txt.append(f"<a href='{u}'>{q}</a> (${m['volume']:,.0f} vol)")
+                text += "\n" + "\n".join(link_txt)
         print(text)
         if cfg.telegram.enabled:
             send_message(cfg.telegram, text)
