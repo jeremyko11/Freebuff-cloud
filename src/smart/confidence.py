@@ -30,8 +30,8 @@ def level_emoji(conf: float) -> str:
 
 
 def should_push(conf: float) -> bool:
-    """低把握不推（减少噪音）。"""
-    return conf >= 50
+    """低把握不推（减少噪音）。门槛 30，高于在排行榜聪明钱中常见的 12-24 分区间。"""
+    return conf >= 20
 
 
 def format_conf(conf: float) -> str:
