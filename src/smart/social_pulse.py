@@ -16,7 +16,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 API = "https://lunarcrush.com/api4/public/topic"
-DEFAULT_TOPICS = ["polymarket", "polymarket whale", "prediction market"]
+DEFAULT_TOPICS = [
+    "polymarket", "prediction market",
+    "bitcoin", "ethereum",
+    "trump", "us election", "iran", "war",
+    "interest rate", "fed", "recession",
+    "hurricane", "yangzhou",
+]
 _STATE_FILE = "data/social_pulse_state.json"
 
 
@@ -69,12 +75,17 @@ def check_social_signals(topics: list[str] = None) -> list[dict]:
         if prev:
             posts_delta = (cur["posts"] or 0) - (prev.get("posts") or 0)
             sent_delta = (cur["sentiment"] or 50) - (prev.get("sentiment") or 50)
+            # 趋势转向（非flat波动）也是信号
+            trend_shift = prev.get("trend") != cur["trend"] and cur["trend"] in ("up", "down")
             if posts_delta > max(500, prev.get("posts") or 0):
                 signals.append({"keyword": kw, "type": "热度突增", "posts": cur["posts"],
                                 "delta": posts_delta, "trend": cur["trend"]})
             elif abs(sent_delta) > 20:
                 signals.append({"keyword": kw, "type": "情绪突变", "sentiment": cur["sentiment"],
                                 "delta": sent_delta})
+            elif trend_shift:
+                signals.append({"keyword": kw, "type": "趋势转向", "trend": cur["trend"],
+                                "prev_trend": prev.get("trend"), "sentiment": cur["sentiment"]})
         state[kw] = cur
     save_state(state)
     return signals
@@ -84,4 +95,7 @@ def format_social_signal(sig: dict) -> str:
     if sig.get("type") == "热度突增":
         return (f"🔥 <b>[社交热度突增]</b> {sig['keyword']}\n提及 {sig['posts']:,} "
                 f"(+{sig['delta']:,}) 趋势:{sig.get('trend','-')}")
+    if sig.get("type") == "趋势转向":
+        arrow = "📈" if sig.get("trend")=="up" else "📉"
+        return (f"{arrow} <b>[社交趋势转向]</b> {sig['keyword']}\n{sig.get('prev_trend')}→{sig.get('trend')} 情绪 {sig.get('sentiment')}")
     return (f"🌡 <b>[社交情绪突变]</b> {sig['keyword']}\n情绪 {sig['sentiment']} (变化 {sig['delta']:+})")
