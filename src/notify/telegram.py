@@ -74,6 +74,8 @@ def format_signal(s: Signal) -> str:
     ]
     if getattr(s, "market_label", ""):
         lines.append(f"🏷️ {s.market_label}")
+    wallet_url = f"https://polymarket.com/profile/{s.address}"
+    lines.append(f"👤 <a href='{wallet_url}'>钱包主页</a>")
     lines += [
         f"市场：{title}",
         f"方向：<b>{s.side} {s.outcome}</b> @ {s.price:.3f}",
