@@ -55,7 +55,7 @@ class SmartMoneyConfig:
     watchlist_path: str = os.environ.get("SM_WATCHLIST_PATH", "data/watchlist.json")
     # 小资金聪明钱发现（聚焦热门市场参与者）
     cap_hot_markets: int = _env_int("CAP_HOT_MARKETS", 5)
-    cap_sample_wallets: int = _env_int("CAP_SAMPLE_WALLETS", 20)
+    cap_sample_wallets: int = _env_int("CAP_SAMPLE_WALLETS", 40)
     cap_volume_min: float = _env_float("CAP_VOLUME_MIN", 1000.0)
     cap_volume_max: float = _env_float("CAP_VOLUME_MAX", 50000.0)
     # 做市商剔除：1h 内双向成交都活跃即视为 MM
