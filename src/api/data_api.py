@@ -132,14 +132,18 @@ def fetch_leaderboard(
     limit: int = 50,
     order_by: str = "PNL",
     category: str = "OVERALL",
+    offset: int = 0,
 ) -> list[dict]:
-    """排行榜。period: DAY/WEEK/MONTH/ALL；order_by: PNL/VOL；limit ≤ 50。"""
+    """排行榜。period: DAY/WEEK/MONTH/ALL；order_by: PNL/VOL；limit ≤ 50。
+
+    offset 用于分页翻页（每页最多 50 条），多页时可拼接出完整榜单。
+    """
     params = urllib.parse.urlencode({
         "timePeriod": period,
         "orderBy": order_by,
         "category": category,
         "limit": str(min(limit, 50)),
-        "offset": "0",
+        "offset": str(max(offset, 0)),
     })
     data = _request_json(f"{DATA_API_BASE}/v1/leaderboard?{params}")
     if not isinstance(data, list):

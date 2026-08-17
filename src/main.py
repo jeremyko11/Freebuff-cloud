@@ -47,7 +47,7 @@ def cmd_seed() -> int:
     from src.store.db import Store
     cfg = get_config()
     store = Store(cfg.db_path)
-    passed, rejected = build_watchlist(cfg.smart)
+    passed, rejected = build_watchlist(cfg.smart, store=store)
     store.upsert_wallets(passed)
     print(f"\n入围 {len(passed)} 个：")
     for w in passed:

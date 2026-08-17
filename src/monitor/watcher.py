@@ -46,7 +46,7 @@ class Watcher:
     def refresh_watchlist(self) -> None:
         """重建聪明钱名单（入库 + 通知摘要）。"""
         t0 = time.time()
-        passed, rejected = build_watchlist(self.cfg.smart)
+        passed, rejected = build_watchlist(self.cfg.smart, store=self.store)
         self.watchlist = passed
         self.store.upsert_wallets(passed)
         # 为每个钱包按历史信号推断主导市场类型
