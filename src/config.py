@@ -43,8 +43,8 @@ class TelegramConfig:
 class SmartMoneyConfig:
     # 播种：三个周期排行榜 + 分类榜，取并集
     seed_periods: list = field(default_factory=lambda: ["DAY", "WEEK", "MONTH"])
-    seed_per_period: int = _env_int("SM_SEED_PER_PERIOD", 50)
-    seed_categories: list = field(default_factory=lambda: _env_list("SM_SEED_CATEGORIES", "OVERALL"))
+    seed_per_period: int = _env_int("SM_SEED_PER_PERIOD", 80)
+    seed_categories: list = field(default_factory=lambda: _env_list("SM_SEED_CATEGORIES", "OVERALL,SPORTS,POLITICS,CRYPTO"))
     # 准入门槛
     min_win_rate: float = _env_float("SM_MIN_WIN_RATE", 0.55)      # 胜率 ≥ 55%
     min_closed_trades: int = _env_int("SM_MIN_CLOSED_TRADES", 10)  # 已平仓 ≥ 10 笔
