@@ -534,7 +534,7 @@ def cmd_daily() -> int:
         r = _sp.run(
             [_py, "scripts/verify_wallets.py", "--hours", "720",
              "--sources", "小盘,天气,全局", "--report"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=200,
             cwd=str(Path(__file__).resolve().parent.parent))
         out = (r.stdout or "")
         if r.returncode == 0 and "钱包表现验证" in out:
