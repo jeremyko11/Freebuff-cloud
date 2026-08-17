@@ -10,6 +10,7 @@
     python -m src.main tag clear <钱包名|地址>           # 清空手动标签
 """
 import os
+from pathlib import Path
 import argparse
 import logging
 import sys
@@ -495,6 +496,34 @@ def cmd_daily() -> int:
             est = wnl.get(name, None)
             est_s = (f"+${est:,.0f}" if est and est > 0 else (f"-${-est:,.0f}" if est and est < 0 else "$0")) if est is not None else "-"
             lines.append(f"  {name[:16]:<16} {r['n']}信号 估{est_s}")
+
+    lines.append("")
+    # 推送方向验证（每日回测近 72h 信号，重算胜率表校准 EV 档位）
+    try:
+        import subprocess
+        venv_py = str(Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python")
+        if not Path(venv_py).exists():
+            venv_py = "python"
+        r = subprocess.run(
+            [venv_py, "scripts/verify_signals.py", "--hours", "72",
+             "--report", "--out", "data/signal_verify.json"],
+            capture_output=True, text=True, timeout=300, cwd=str(Path(__file__).resolve().parent.parent))
+        out = (r.stdout or "")
+        if r.returncode == 0 and "推送方向验证" in out:
+            idx = out.find("======== 推送方向验证")
+            if idx >= 0:
+                body_verify = out[idx + len("======== 推送方向验证 (日报) ========"):].strip()
+                if body_verify:
+                    import html as _html
+                    lines.append("🧪 方向验证(近72h):")
+                    for ln in body_verify.splitlines():
+                        ln = ln.strip()
+                        if ln and "胜率表已重算" not in ln:
+                            lines.append("  " + _html.escape(ln))
+        else:
+            lines.append("🧪 方向验证: 跳过 (err=%s)" % (r.stderr or r.stdout or "")[:120])
+    except Exception as e:
+        lines.append("🧪 方向验证: 异常 %s" % e)
 
     lines.append("")
     lines.append("由 freebuff-cloud 自动生成")

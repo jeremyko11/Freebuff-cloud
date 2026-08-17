@@ -78,6 +78,8 @@ def main() -> int:
     ap.add_argument("--sample", type=int, default=0, help="0=全部")
     ap.add_argument("--since-id", type=int, default=0)
     ap.add_argument("--out", default="data/signal_verify.json")
+    ap.add_argument("--report", action="store_true",
+                    help="输出紧凑摘要(供日报追加)并重算 winrate_bands.json")
     args = ap.parse_args()
 
     db = sqlite3.connect(DB)
@@ -207,7 +209,61 @@ def main() -> int:
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(results, ensure_ascii=False, indent=1))
     print(f"\n明细已保存: {args.out}")
+
+    if args.report:
+        _emit_report(valid)
     return 0
+
+
+def _emit_report(valid: list) -> None:
+    """日报模式：输出紧凑摘要 + 重算 winrate_bands.json（供 filter 校准 EV）。"""
+    import time as _t
+
+    wins = [x for x in valid if (x["profit"] or 0) > 0]
+    settled = [x for x in valid if x["status"] == "settled"]
+    n = len(valid)
+    wr_all = len(wins) / n if n else 0
+
+    def pct(a, b):
+        return f"{100*a/b:.1f}%" if b else "-"
+
+    print("\n======== 推送方向验证 (日报) ========")
+    print(f"✅ 验证 {n} 条 · 方向准确率 {pct(len(wins), n)} · "
+          f"已结算 {len(settled)} (胜率 {pct(sum(1 for x in settled if (x['profit'] or 0) > 0), len(settled))})")
+
+    # 按价格段胜率（顺便重算 winrate_bands.json）
+    bands = [("<0.1", 0, 0.1), ("0.1-0.25", 0.1, 0.25), ("0.25-0.5", 0.25, 0.5),
+             ("0.5-0.8", 0.5, 0.8), (">0.8", 0.8, 1.01)]
+    band_stats = {}
+    for name, lo, hi in bands:
+        xs = [x for x in valid if lo <= (x["buy_price"] or 0.5) < hi]
+        w = sum(1 for x in xs if (x["profit"] or 0) > 0)
+        wr = w / len(xs) if xs else None
+        band_stats[name] = {"n": len(xs), "win_rate": wr}
+        if wr is not None:
+            print(f"  {name:9s} n={len(xs):4d}  胜率 {pct(w, len(xs))}")
+
+    # 市场类目表现（Top3 差）
+    by_cat = defaultdict(list)
+    for x in valid:
+        by_cat[x["market_category"] or "未分类"].append(x)
+    cats = sorted(by_cat.items(), key=lambda kv: -len(kv[1]))[:4]
+    if cats:
+        print("  " + " | ".join(
+            f"{c}:{pct(sum(1 for x in xs if (x['profit'] or 0) > 0), len(xs))}"
+            for c, xs in cats))
+
+    # 重算 winrate_bands.json（有样本的档位写入，filter 用它校准）
+    try:
+        out = {"source": "daily verification", "generated_ts": _t.time(), "bands": {}}
+        for name, st in band_stats.items():
+            if st["win_rate"] is not None and st["n"] > 0:
+                out["bands"][name] = {"n": st["n"], "win_rate": round(st["win_rate"], 4)}
+        Path("data/winrate_bands.json").write_text(
+            json.dumps(out, ensure_ascii=False, indent=1))
+        print(f"\n胜率表已重算 → data/winrate_bands.json ({len(out['bands'])} 档)")
+    except Exception as e:
+        print(f"\n⚠️ 胜率表重算失败: {e}")
 
 
 if __name__ == "__main__":
