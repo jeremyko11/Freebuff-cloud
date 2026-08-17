@@ -123,9 +123,11 @@ class RtdsWatcher:
             logger.warning("RTDS 信号处理失败 %s: %s", addr[:12], e)
 
     def _notify(self, s: Signal) -> None:
-        # 计算把握度：低把握不推送（减少噪音），高把握标注
+        # 把握度：排行榜聪明钱（已过严格准入）直接推；非排行榜用把握分防噪音
         conf = 100.0
         try:
+            from src.smart.filter import _resolve_source_type
+            src_type = _resolve_source_type(s, self.store)
             wr = None
             row = self.store._conn.execute(
                 "SELECT win_rate FROM wallets WHERE address=?", (s.address,)).fetchone()
@@ -133,7 +135,9 @@ class RtdsWatcher:
                 wr = row["win_rate"]
             from src.smart.confidence import confidence, should_push, format_conf
             conf = confidence(wr, s.price, s.usdc)
-            if not should_push(conf):
+            # 排行榜来源降低门槛到 0（这类钱包信号本身就是聪明钱动作）；其他保留 20
+            threshold = 0 if src_type == "排行榜" else 20
+            if conf < threshold:
                 logger.info("低把握信号[跳过推送] %s %s %.0f分", s.wallet_name or s.address[:10], s.type, conf)
                 return
         except Exception:
