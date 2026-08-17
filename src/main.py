@@ -507,6 +507,24 @@ def cmd_daily() -> int:
     return 0 if ok else 1
 
 
+def cmd_socialpulse() -> int:
+    """LunarCrush 社交脉搏：监控 Polymarket 社交热度/情绪突变并推送。"""
+    from src.config import get_config
+    from src.notify.telegram import send_message
+    from src.smart.social_pulse import check_social_signals, format_social_signal
+    cfg = get_config()
+    sigs = check_social_signals()
+    if not sigs:
+        print("无社交信号变化")
+        return 0
+    for sig in sigs:
+        text = format_social_signal(sig)
+        print(text)
+        if cfg.telegram.enabled:
+            send_message(cfg.telegram, text)
+    return 0
+
+
 def cmd_globaldiscover() -> int:
     """全局活跃交易者发现：补充排行榜外的盈利聪明钱。"""
     from src.config import get_config
@@ -628,6 +646,7 @@ def main() -> int:
     sub.add_parser("xdiscover", help="X 社交发现聪明钱（需 X_BEARER）")
     sub.add_parser("weatherdiscover", help="发现天气市场聪明钱")
     sub.add_parser("globaldiscover", help="发现全局活跃盈利交易者")
+    sub.add_parser("socialpulse", help="LunarCrush社交脉搏信号")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
     sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
@@ -681,6 +700,8 @@ def main() -> int:
         return cmd_backfill()
     if cmd == "daily":
         return cmd_daily()
+    if cmd == "socialpulse":
+        return cmd_socialpulse()
     if cmd == "globaldiscover":
         return cmd_globaldiscover()
     if cmd == "weatherdiscover":
