@@ -581,7 +581,7 @@ def cmd_globaldiscover() -> int:
     store = Store(cfg.db_path)
     existing = set(r["address"] for r in store._conn.execute("SELECT address FROM wallets WHERE active=1"))
     print(f"全局发现（已知 {len(existing)}）...")
-    found = discover_global_smart(budget=20, existing=existing, sample_pages=8)
+    found = discover_global_smart(budget=8, existing=existing, sample_pages=4)
     if not found:
         print("本轮无新发现")
         return 0
