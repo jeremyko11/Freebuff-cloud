@@ -55,7 +55,7 @@ def main() -> int:
         print("\n[dry-run] 未写入数据库")
         return 0
 
-    store.upsert_wallets(passed)
+    store.upsert_wallets(passed, reset_inactive=False)  # 增量合并，不清现有活跃钱包
     n_active = store._conn.execute(
         "SELECT COUNT(*) FROM wallets WHERE active=1").fetchone()[0]
     print(f"\n✅ 已写入数据库，活跃钱包数: {n_active}", flush=True)
