@@ -31,22 +31,56 @@ def extract_addresses(text: str) -> list[str]:
     return re.findall(r"0x[a-fA-F0-9]{6,}", text or "")
 
 
+def extract_usernames(text: str) -> list[str]:
+    """从文本提取 @用户名（小写去重）。"""
+    seen = set()
+    for m in re.finditer(r"@([A-Za-z0-9_]{2,})", text or ""):
+        seen.add(m.group(1).lower())
+    return list(seen)
+
+
 def discover_hn_smart(queries=("polymarket whale", "polymarket smart money",
                                "polymarket profit", "polymarket big winner"),
-                      max_results: int = 8) -> list[dict]:
-    """从 HN 讨论中提取钱包地址候选。"""
-    seen = {}
+                      max_results: int = 8, resolve_usernames: bool = True) -> list[dict]:
+    """从 HN 讨论中提取候选。
+
+    两条路径：
+      1. 文本里直接出现的 0x 钱包地址
+      2. resolve_usernames=True 时，把 @用户名反查排行榜（userName/xUsername）
+         —— HN 讨论很少直接贴地址，但常提到交易者用户名
+    """
+    hits_text = []
     for q in queries:
         for hit in search_polymarket(q, hits=max_results):
-            # 提取地址
             title = hit.get("title") or ""
             text = hit.get("story_text") or hit.get("comment_text") or ""
-            for addr in extract_addresses(title + " " + text):
-                if addr not in seen:
-                    seen[addr.lower()] = {
-                        "address": addr.lower(),
-                        "source_title": title[:60],
-                        "hn_url": f"https://news.ycombinator.com/item?id={hit.get('objectID')}",
-                    }
+            hits_text.append({
+                "title": title,
+                "text": title + " " + text,
+                "hn_url": f"https://news.ycombinator.com/item?id={hit.get('objectID')}",
+            })
         time.sleep(0.5)
+
+    umap = {}
+    if resolve_usernames:
+        try:
+            from src.smart.xdiscover import build_username_map
+            umap = build_username_map()
+            logger.info("HN 用户名反查映射：%d 个用户名", len(umap))
+        except Exception as e:
+            logger.warning("HN 用户名反查失败: %s", e)
+
+    seen = {}
+    for h in hits_text:
+        for addr in extract_addresses(h["text"]):
+            a = addr.lower()
+            if a not in seen:
+                seen[a] = {"address": a, "source": "0x地址",
+                            "source_title": h["title"][:60], "hn_url": h["hn_url"]}
+        if umap:
+            for u in extract_usernames(h["text"]):
+                addr = umap.get(u)
+                if addr and addr not in seen:
+                    seen[addr] = {"address": addr, "source": f"@{u}",
+                                  "source_title": h["title"][:60], "hn_url": h["hn_url"]}
     return list(seen.values())

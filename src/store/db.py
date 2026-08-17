@@ -104,6 +104,9 @@ class Store:
             w_cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(wallets)")]
             if "x_username" not in w_cols:
                 self._conn.execute("ALTER TABLE wallets ADD COLUMN x_username TEXT DEFAULT ''")
+            for col in ("auto_tags", "manual_tags", "market_type"):
+                if col not in w_cols:
+                    self._conn.execute(f"ALTER TABLE wallets ADD COLUMN {col} TEXT DEFAULT ''")
             for col in ("market_category", "market_league", "wallet_source_type"):
                 if col not in sig_cols:
                     self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} TEXT")

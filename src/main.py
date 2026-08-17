@@ -650,6 +650,34 @@ def cmd_xdiscover() -> int:
     return 0
 
 
+def cmd_hndiscover() -> int:
+    """HackerNews 社交发现：搜 Polymarket 讨论，提取 0x 地址/@用户名反查钱包。"""
+    from src.config import get_config
+    from src.store.db import Store
+    from src.smart import watchlist
+    from src.smart.discovery import Wallet
+    from src.smart.hn_discover import discover_hn_smart
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    print("HN 搜索 Polymarket 聪明钱讨论（免费 Algolia API）...")
+    found = discover_hn_smart()
+    if not found:
+        print("本轮 HN 未发现可映射钱包（讨论里很少直接贴地址/用户名）")
+        return 0
+    added = 0
+    for item in found:
+        addr = item["address"]
+        watchlist.add(cfg.smart.watchlist_path, addr, source="hn",
+                      note=f"HN {item.get('source','')}: {item.get('source_title','')[:40]}")
+        w = Wallet(address=addr, source="community:hn")
+        w.extra = {"source_label": "HackerNews", "note": item.get("source", "")}
+        store.upsert_wallets([w], reset_inactive=False)
+        added += 1
+        print(f"  ✅ {addr[:16]}... [{item.get('source','')}] {item.get('source_title','')[:50]}")
+    print(f"新增 {added} 个（来源 HN）")
+    return 0
+
+
 def cmd_rtds() -> int:
     """RTDS 实时推送监控（订阅全市场流过滤目标钱包，替代 2s 轮询）。"""
     import signal
@@ -684,12 +712,20 @@ def cmd_run() -> int:
 
 
 def main() -> int:
+    # Windows GBK 控制台打印 emoji/中文会 UnicodeEncodeError：统一切 UTF-8（errors=replace 兜底）
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            if _s is not None and _s.encoding and _s.encoding.lower() not in ("utf-8", "utf8"):
+                _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(prog="freebuff", description="Polymarket 聪明钱跟踪 bot")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("run", help="启动监控守护（默认）")
     sub.add_parser("rtds", help="RTDS 实时推送监控（亚秒级，替代2s轮询）")
     sub.add_parser("cmdbot", help="Telegram /filter 命令监听（筛选设置）")
     sub.add_parser("xdiscover", help="X 社交发现聪明钱（需 X_BEARER）")
+    sub.add_parser("hndiscover", help="HackerNews 社交发现（免费，无需 key）")
     sub.add_parser("weatherdiscover", help="发现天气市场聪明钱")
     sub.add_parser("globaldiscover", help="发现全局活跃盈利交易者")
     sub.add_parser("socialpulse", help="LunarCrush社交脉搏信号")
@@ -754,6 +790,8 @@ def main() -> int:
         return cmd_weatherdiscover()
     if cmd == "xdiscover":
         return cmd_xdiscover()
+    if cmd == "hndiscover":
+        return cmd_hndiscover()
     if cmd == "cmdbot":
         return cmd_cmdbot()
     if cmd == "rtds":

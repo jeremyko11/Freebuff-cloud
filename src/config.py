@@ -62,6 +62,8 @@ class SmartMoneyConfig:
     mm_window_sec: int = _env_int("SM_MM_WINDOW_SEC", 3600)
     mm_min_trades: int = _env_int("SM_MM_MIN_TRADES", 20)
     refresh_hours: int = _env_int("SM_REFRESH_HOURS", 24)          # 名单刷新周期
+    # 社交/全局发现周期（小时；0=关闭）：globaldiscover/hndiscover/xdiscover/socialpulse
+    discover_hours: float = _env_float("SM_DISCOVER_HOURS", 6.0)
 
 
 @dataclass

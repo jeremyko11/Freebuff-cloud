@@ -213,6 +213,117 @@ class Watcher:
                     self.store.set_verification(sig["id"], "1h", mid)
 
     # ------------------------------------------------------------------
+    def discover_sources(self) -> list[str]:
+        """周期社交/全局发现：globaldiscover + hndiscover (+ xdiscover 需 X_BEARER)
+
+        新钱包直接入库，社交脉搏信号单独推送；返回本次摘要行。
+        """
+        from src.smart import watchlist
+        from src.smart.discovery import Wallet
+        lines: list[str] = []
+        existing = set(r["address"] for r in self.store._conn.execute(
+            "SELECT address FROM wallets WHERE active=1"))
+
+        # 1) 全局活跃盈利交易者（排行榜外）
+        try:
+            from src.smart.global_discover import discover_global_smart
+            found = discover_global_smart(budget=10, existing=existing, sample_pages=4)
+            added = 0
+            for c in found:
+                addr = c["address"]
+                watchlist.add(self.cfg.smart.watchlist_path, addr, source="global",
+                              note=f"全局活跃盈利 real+${c['realized_pnl']:.0f}")
+                w = Wallet(address=addr, name=c["name"], source="community:global")
+                w.pnl = c["realized_pnl"]; w.volume = c["volume"]
+                self.store.upsert_wallets([w], reset_inactive=False)
+                existing.add(addr)
+                added += 1
+            if added:
+                names = ", ".join((c["name"] or c["address"][:10]) for c in found[:5])
+                lines.append(f"🌍 全局发现 +{added}（{names}…）")
+                logger.info("周期全局发现新增 %d 个", added)
+        except Exception:
+            logger.exception("周期全局发现异常")
+
+        # 2) HackerNews 社交发现（免费）
+        try:
+            from src.smart.hn_discover import discover_hn_smart
+            found = discover_hn_smart()
+            added = 0
+            for item in found:
+                addr = item["address"]
+                if addr in existing:
+                    continue
+                watchlist.add(self.cfg.smart.watchlist_path, addr, source="hn",
+                              note=f"HN {item.get('source', '')}: {item.get('source_title', '')[:40]}")
+                w = Wallet(address=addr, source="community:hn")
+                w.extra = {"source_label": "HackerNews", "note": item.get("source", "")}
+                self.store.upsert_wallets([w], reset_inactive=False)
+                existing.add(addr)
+                added += 1
+            if added:
+                lines.append(f"📰 HN 发现 +{added}")
+                logger.info("周期 HN 发现新增 %d 个", added)
+        except Exception:
+            logger.exception("周期 HN 发现异常")
+
+        # 3) X/Twitter 社交发现（需 X_BEARER，未配置则跳过）
+        if self.cfg.x.bearer:
+            try:
+                from src.smart.xdiscover import x_mentions_listed
+                found = x_mentions_listed(self.cfg.x)
+                added = 0
+                for item in found:
+                    addr = item["address"].lower()
+                    if addr in existing:
+                        continue
+                    watchlist.add(self.cfg.smart.watchlist_path, addr, source="x",
+                                  note=f"X @{item['twitter_user']} 被推荐: {item['tweet_text'][:30]}")
+                    w = Wallet(address=addr, source="community:x")
+                    w.extra = {"source_label": "X/Twitter", "note": item["twitter_user"]}
+                    self.store.upsert_wallets([w], reset_inactive=False)
+                    existing.add(addr)
+                    added += 1
+                if added:
+                    lines.append(f"🐦 X 发现 +{added}")
+                    logger.info("周期 X 发现新增 %d 个", added)
+            except Exception:
+                logger.exception("周期 X 发现异常")
+
+        # 4) 社交脉搏信号（LunarCrush，单独推送）
+        try:
+            from src.smart.social_pulse import (check_social_signals, format_social_signal,
+                                                find_related_markets)
+            sigs = check_social_signals()
+            if sigs:
+                lines.append(f"📡 社交信号 x{len(sigs)}")
+                for sig in sigs:
+                    text = format_social_signal(sig)
+                    kw = sig.get("keyword", "")
+                    if kw:
+                        related = find_related_markets(kw, n=2)
+                        if related:
+                            text += "\n\n🎯 相关市场："
+                            for m in related:
+                                q = m["question"]
+                                if len(q) > 60:
+                                    q = q[:60] + "…"
+                                text += (f"\n<a href='https://polymarket.com/market/{m['slug']}'>"
+                                         f"{q}</a> (${m['volume']:,.0f} vol)")
+                    if self.cfg.telegram.enabled:
+                        send_message(self.cfg.telegram, text)
+                    else:
+                        logger.info("社交信号: %s", text.replace("\n", " | "))
+        except Exception:
+            logger.exception("周期社交脉搏异常")
+
+        if lines:
+            logger.info("周期发现完成：%s", "；".join(lines))
+            if self.cfg.telegram.enabled:
+                send_message(self.cfg.telegram, "\n".join(["🧭 <b>发现源巡检</b>"] + lines))
+        return lines
+
+    # ------------------------------------------------------------------
     def run_forever(self) -> None:
         """主守护循环。"""
         signal.signal(signal.SIGINT, _request_stop)
@@ -221,9 +332,16 @@ class Watcher:
                     self.cfg.monitor.poll_interval_sec, -1)
         self.refresh_watchlist()
         self.store.set_meta("last_seed_ts", str(time.time()))
+        # 启动时先跑一轮发现源（随后按 discover_hours 周期巡检）
+        if self.cfg.smart.discover_hours > 0:
+            try:
+                self.discover_sources()
+            except Exception:
+                logger.exception("启动发现异常")
 
         last_seed = time.time()
         last_verify = 0.0
+        last_discover = 0.0
         global _stop
         while not _stop:
             t0 = time.time()
@@ -245,6 +363,14 @@ class Watcher:
                 except Exception:
                     logger.exception("验证回填异常")
                 last_verify = time.time()
+
+            if (self.cfg.smart.discover_hours > 0
+                    and time.time() - last_discover > self.cfg.smart.discover_hours * 3600):
+                try:
+                    self.discover_sources()
+                except Exception:
+                    logger.exception("周期发现异常")
+                last_discover = time.time()
 
             sleep_left = max(0, self.cfg.monitor.poll_interval_sec - (time.time() - t0))
             end = time.time() + sleep_left
