@@ -151,6 +151,14 @@ class RtdsWatcher:
                 return
         except Exception:
             pass
+        # 期望值(EV)评估：给推送标注价格是否值得跟
+        try:
+            from src.smart.filter import ev_assess
+            ev, grade, note = ev_assess(s)
+            s.ev_grade = grade
+            s.ev_note = note
+        except Exception:
+            pass
         # 注入标签/市场分类（与轮询一致）
         try:
             auto, manual, _ = self.store.wallet_tags(s.address)

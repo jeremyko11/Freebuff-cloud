@@ -83,6 +83,10 @@ def format_signal(s: Signal) -> str:
     ]
     if s.type == "SWEEP":
         lines.append(f"累积：{s.trade_count} 笔小单")
+    ev_grade = getattr(s, "ev_grade", "")
+    if ev_grade:
+        ev_note = getattr(s, "ev_note", "")
+        lines.append(f"{ev_grade} {ev_note}")
     if url:
         lines.append(url)
     if s.tx_hashes:
