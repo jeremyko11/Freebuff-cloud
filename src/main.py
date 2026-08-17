@@ -9,6 +9,7 @@
     python -m src.main tag rm  <钱包名|地址> <标签...>    # 移除手动标签
     python -m src.main tag clear <钱包名|地址>           # 清空手动标签
 """
+import os
 import argparse
 import logging
 import sys
@@ -565,7 +566,8 @@ def cmd_weatherdiscover() -> int:
     store = Store(cfg.db_path)
     wl_path = cfg.smart.watchlist_path
     print("开始天气聪明钱发现...")
-    found = discover_weather_smart(budget_wallets=50)
+    budget = int(os.environ.get("SM_WEATHER_BUDGET", "50"))
+    found = discover_weather_smart(budget_wallets=budget)
     if not found:
         print("本轮未筛出天气聪明钱（天气市场盈利者少）")
         return 0
