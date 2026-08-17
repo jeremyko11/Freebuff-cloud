@@ -30,6 +30,7 @@ def main() -> int:
     ap.add_argument("--hours", type=int, default=720)  # 默认近30天
     ap.add_argument("--sources", default="天气,全局,小盘,社区,手动,HackerNews")
     ap.add_argument("--dry-run", action="store_true", help="只统计不回写")
+    ap.add_argument("--report", action="store_true", help="日报模式：紧凑摘要")
     ap.add_argument("--db", default="data/freebuff.db")
     ap.add_argument("--out", default="data/wallet_verify.json")
     args = ap.parse_args()
@@ -131,17 +132,42 @@ def main() -> int:
     db.commit()
 
     # 输出
-    print(f"\n{'钱包'.ljust(18)} {'来源':<8} {'验证数':>5} {'方向胜率':>8} {'结算数':>5} {'结算胜率':>8}")
-    for addr, r in sorted(results.items(), key=lambda kv: -kv[1]["direction_wr"]):
-        st = r["settled_wr"]
-        print(f"{addr[:16].ljust(18)} {r['src']:<8} {r['signals_verified']:>5} "
-              f"{100*r['direction_wr']:>7.1f}% {r['settled']:>5} "
-              f"{('%.1f%%' % (100*st)) if st is not None else '-':>8}")
+    if args.report:
+        _emit_report(results)
+    else:
+        print(f"\n{'钱包'.ljust(18)} {'来源':<8} {'验证数':>5} {'方向胜率':>8} {'结算数':>5} {'结算胜率':>8}")
+        for addr, r in sorted(results.items(), key=lambda kv: -kv[1]["direction_wr"]):
+            st = r["settled_wr"]
+            print(f"{addr[:16].ljust(18)} {r['src']:<8} {r['signals_verified']:>5} "
+                  f"{100*r['direction_wr']:>7.1f}% {r['settled']:>5} "
+                  f"{('%.1f%%' % (100*st)) if st is not None else '-':>8}")
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(results, ensure_ascii=False, indent=1))
     suffix = "（dry-run 未回写）" if args.dry_run else "（已回写 win_rate/score）"
     print(f"\n明细: {args.out} {suffix}")
     return 0
+
+
+def _emit_report(results: dict) -> None:
+    """日报模式：紧凑摘要 —— 各来源钱包数/样本/胜率均值。"""
+    if not results:
+        print("小盘钱包验证：无历史信号结果")
+        return
+    by_src = defaultdict(list)
+    for addr, r in results.items():
+        by_src[r["src"]].append((addr, r))
+    print("======== 钱包表现验证 (附加源) ========")
+    for src, rs in sorted(by_src.items(), key=lambda kv: -len(kv[1])):
+        n_w = len(rs)
+        wr = sum(r["direction_wr"] for _a, r in rs) / n_w
+        samples = sum(r["signals_verified"] for _a, r in rs)
+        # 只显示样本>=2 的稳定钱包
+        print(f"  {src}: {n_w}钱包 均方向胜率{100*wr:.0f}% 样本{samples}")
+        for addr, r in sorted(rs, key=lambda x: -x[1]["direction_wr"])[:3]:
+            n = r["signals_verified"]
+            if n >= 2:
+                nm = r["name"] or addr[:14]
+                print(f"    · {nm[:20]} {100*r['direction_wr']:.0f}% (n={n})")
 
 
 if __name__ == "__main__":

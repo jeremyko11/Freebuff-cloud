@@ -525,6 +525,35 @@ def cmd_daily() -> int:
     except Exception as e:
         lines.append("🧪 方向验证: 异常 %s" % e)
 
+    # 附加源钱包表现验证（小盘/天气/全局等，回填胜率并汇报）
+    try:
+        import subprocess as _sp
+        _py = str(Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python")
+        if not Path(_py).exists():
+            _py = "python"
+        r = _sp.run(
+            [_py, "scripts/verify_wallets.py", "--hours", "720",
+             "--sources", "小盘,天气,全局", "--report"],
+            capture_output=True, text=True, timeout=120,
+            cwd=str(Path(__file__).resolve().parent.parent))
+        out = (r.stdout or "")
+        if r.returncode == 0 and "钱包表现验证" in out:
+            idx = out.find("======== 钱包表现验证")
+            body = out[idx + len("======== 钱包表现验证 (附加源) ========"):].strip()
+            if body:
+                body = body.replace("胜率表已重算", "").strip()
+                import html as _html
+                lines.append("")
+                lines.append("👛 钱包表现(附加源):")
+                for ln in body.splitlines():
+                    ln = ln.strip()
+                    if ln and "明细:" not in ln:
+                        lines.append("  " + _html.escape(ln))
+        elif r.returncode == 0:
+            lines.append("")
+            lines.append("👛 钱包表现: 暂停(样本不足)")
+    except Exception:
+        pass
     lines.append("")
     lines.append("由 freebuff-cloud 自动生成")
     body = "\n".join(lines)
