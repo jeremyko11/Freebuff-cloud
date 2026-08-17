@@ -507,6 +507,35 @@ def cmd_daily() -> int:
     return 0 if ok else 1
 
 
+def cmd_weatherdiscover() -> int:
+    """发现天气市场聪明钱，加入观察名单（source=weather）。"""
+    from src.config import get_config
+    from src.store.db import Store
+    from src.smart import watchlist
+    from src.smart.discovery import Wallet
+    from src.smart.weather_discover import discover_weather_smart
+    cfg = get_config()
+    store = Store(cfg.db_path)
+    wl_path = cfg.smart.watchlist_path
+    print("开始天气聪明钱发现...")
+    found = discover_weather_smart(budget_wallets=20)
+    if not found:
+        print("本轮未筛出天气聪明钱（天气市场盈利者少）")
+        return 0
+    added = 0
+    for c in found:
+        addr = c["address"].lower()
+        watchlist.add(wl_path, addr, source="weather",
+                      note=f"天气聪明钱 real+${c['realized_pnl']:.0f}")
+        w = Wallet(address=addr, name=c["name"], source="community:weather")
+        w.pnl = c["realized_pnl"]; w.volume = c["volume"]
+        store.upsert_wallets([w], reset_inactive=False)
+        added += 1
+        print(f"  ✅ {c['name'] or addr[:14]} 已实现+${c['realized_pnl']:,.0f} 加入")
+    print(f"\n新增 {added} 个天气聪明钱")
+    return 0
+
+
 def cmd_xdiscover() -> int:
     """X 社交发现：搜索 Polymarket 聪明钱讨论，反查钱包加入名单。"""
     from src.config import get_config
@@ -568,6 +597,7 @@ def main() -> int:
     sub.add_parser("rtds", help="RTDS 实时推送监控（亚秒级，替代2s轮询）")
     sub.add_parser("cmdbot", help="Telegram /filter 命令监听（筛选设置）")
     sub.add_parser("xdiscover", help="X 社交发现聪明钱（需 X_BEARER）")
+    sub.add_parser("weatherdiscover", help="发现天气市场聪明钱")
     sub.add_parser("seed", help="只构建一次聪明钱名单")
     sub.add_parser("status", help="查看名单/信号/限流状态")
     sub.add_parser("backfill", help="回填存量信号 asset（供今日盈亏/验证）")
@@ -621,6 +651,8 @@ def main() -> int:
         return cmd_backfill()
     if cmd == "daily":
         return cmd_daily()
+    if cmd == "weatherdiscover":
+        return cmd_weatherdiscover()
     if cmd == "xdiscover":
         return cmd_xdiscover()
     if cmd == "cmdbot":
