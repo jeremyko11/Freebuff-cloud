@@ -52,16 +52,22 @@ class RtdsClient:
             if addr and self.on_trade:
                 self.on_trade(addr, payload)
 
+    # 静默超时：超过该秒数未收到任何数据则强制重连（防止半死连接挂起）
+    _SILENCE_TIMEOUT = 120.0
+
     def _run(self):
         self._status("starting")
+        last_data_ts = time.time()
         while not self._stop.is_set():
             try:
                 if self._ws is None:
                     self._connect()
+                    last_data_ts = time.time()
                 self._ws.settimeout(1)
                 try:
                     data = self._ws.recv()
                     if data:
+                        last_data_ts = time.time()
                         self._handle_msg(data)
                 except websocket.WebSocketTimeoutException:
                     # 心跳：RTDS 建议每 5s PING
@@ -69,6 +75,18 @@ class RtdsClient:
                         self._ws.ping("")
                     except Exception:
                         pass
+                    # 静默检测：长时间无数据 → 强制重建连接（半死连接自救）
+                    if time.time() - last_data_ts > self._SILENCE_TIMEOUT:
+                        logger.warning("RTDS 静默 %.0fs 无数据，强制重连", time.time() - last_data_ts)
+                        self._connected = False
+                        self._status("silence-reconnect")
+                        try:
+                            self._ws.close()
+                        except Exception:
+                            pass
+                        self._ws = None
+                        time.sleep(2)
+                        continue
                     continue
                 except websocket.WebSocketConnectionClosedException:
                     self._connected = False
