@@ -28,10 +28,15 @@ def _hour_bucket(ts_sec: float) -> int:
 
 class RtdsWatcher:
     def __init__(self, cfg: Config, store: Store | None = None):
+        import concurrent.futures
         self.cfg = cfg
         self.store = store or Store(cfg.db_path)
         self.targets: set[str] = set()
         self.wallet_cache: dict[str, str] = {}  # addr -> source
+        # 异步处理池：WebSocket 线程只收消息+快速过滤，重活（gamma反查/DB/TG推送）放线程池，
+        # 避免一次慢请求阻塞整个实时流。
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=8,
+                                                           thread_name_prefix="rtds")
 
     def _refresh_targets(self) -> None:
         """从 wallets(active=1) 刷新目标钱包地址集合。"""
@@ -111,15 +116,32 @@ class RtdsWatcher:
         )
 
     def _on_trade(self, addr: str, t: dict) -> None:
-        """RTDS 每笔成交回调：仅处理目标钱包。"""
+        """RTDS 每笔成交回调：快速过滤目标钱包后，提交线程池异步处理。"""
         if addr not in self.targets:
             return
+        try:
+            self._pool.submit(self._process_trade, addr, t)
+        except Exception as e:
+            logger.warning("RTDS 提交任务失败 %s: %s", addr[:12], e)
+
+    def _process_trade(self, addr: str, t: dict) -> None:
+        """线程池执行完整信号处理（构建/入库/推送），不阻塞 websocket。"""
+        _proc_t0 = time.time()
+        _ts_raw = t.get("timestamp") or 0
         try:
             s = self._build_signal(t)
             if not s:
                 return
             self.store.save_signal(s)
             self._notify(s)
+            # 端到端延迟质检：交易发生 → 推送完成
+            _e2e = (_proc_t0 - (_ts_raw if _ts_raw < 1e12 else _ts_raw / 1000))
+            if _e2e > 3:
+                logger.warning("RTDS 端到端慢 %.1fs <%s> %s ts=%s", _e2e,
+                               s.wallet_name or s.address[:10], s.type, _ts_raw)
+            else:
+                logger.info("RTDS 端到端 %.2fs <%s> %s", _e2e,
+                            s.wallet_name or s.address[:10], s.type)
         except Exception as e:
             logger.warning("RTDS 信号处理失败 %s: %s", addr[:12], e)
 
@@ -168,10 +190,10 @@ class RtdsWatcher:
             s.tags = []
         try:
             from src.smart.market_tags import market_label, classify_slug
-            market = self.store.get_market_type(s.address)
+            # 优先用信号自身 slug 分类（当前市场）；slug 识别不了才回退钱包主导类型
+            market, _ = classify_slug(s.slug or "")
             if not market:
-                # wallets.market_type 空时用信号 slug 现场分类兜底
-                market, _ = classify_slug(s.slug or "")
+                market = self.store.get_market_type(s.address)
             if market:
                 s.market_label = market_label(market)
         except Exception:
@@ -180,11 +202,16 @@ class RtdsWatcher:
                     s.wallet_name or s.address[:10], s.side, s.outcome, s.usdc,
                     s.price or 0, " ".join(s.tags) if s.tags else "")
         if self.cfg.telegram.enabled:
+            _t0 = time.time()
             body = format_signal(s)
             from src.smart.confidence import format_conf
             body += "\n" + format_conf(conf)
-            send_message(self.cfg.telegram, body)
-            self._touch_push()
+            ok = send_message(self.cfg.telegram, body)
+            _push_ms = (time.time() - _t0) * 1000
+            logger.info("RTDS 推送耗时 %.0fms ok=%s <%s> %s", _push_ms, ok,
+                        s.wallet_name or s.address[:10], s.type)
+            if ok:
+                self._touch_push()
 
     def run_forever(self) -> None:
         self._refresh_targets()
@@ -217,6 +244,10 @@ class RtdsWatcher:
                 last_refresh = now
             time.sleep(5)
         client.stop()
+        try:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
         logger.info("RTDS 监控已停止")
 
     def _touch_push(self) -> None:
