@@ -468,6 +468,14 @@ def cmd_daily() -> int:
         loss = sum(1 for b in today_batch if b["pnl"] < 0)
         s = f"+${tot:,.0f}" if tot > 0 else (f"-${-tot:,.0f}" if tot < 0 else "$0")
         lines.append(f"📈 今日盈亏估算: {s} ({win}赚/{loss}亏 估{len(today_batch)}笔)")
+    # 投注结算情况（回填后的结算结果）
+    try:
+        st = store.settlement_stats(24)
+        if st["n"]:
+            wr = 100 * st["wins"] / st["n"] if st["n"] else 0
+            lines.append(f"🧾 已结算: {st['n']}笔 胜率{wr:.0f}% 点数{st['pnl']:+.1f}")
+    except Exception:
+        pass
 
     # 今日市场分布
     m = conn.execute(

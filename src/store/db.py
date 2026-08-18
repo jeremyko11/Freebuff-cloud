@@ -110,6 +110,14 @@ class Store:
             for col in ("market_category", "market_league", "wallet_source_type"):
                 if col not in sig_cols:
                     self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} TEXT")
+            # 投注结果结算：settled=1 表示已回填结算；settled_win=1赢/0输；settled_price=押注方结算价
+            for col, ddl in (("settled", "INTEGER DEFAULT 0"),
+                             ("settled_win", "INTEGER"),
+                             ("settled_price", "REAL"),
+                             ("settled_at", "REAL"),
+                             ("result_pnl", "REAL")):
+                if col not in sig_cols:
+                    self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} {ddl}")
             # 2) seed category dict
             from src.smart.market_tags import market_dict
             self._conn.execute("DELETE FROM market_categories")
@@ -583,6 +591,39 @@ class Store:
         with self._lock, self._conn:
             self._conn.execute(
                 f"UPDATE signals SET {col}=? WHERE id=?", (mid, sig_id))
+
+    # ---------------- 投注结果结算 ----------------
+
+    def set_signal_settlement(self, sig_id: int, win: int, settle_price: float,
+                              result_pnl: float, at: float) -> None:
+        """回填一条信号的结算结果。已结算的不重复覆盖。"""
+        with self._lock, self._conn:
+            self._conn.execute(
+                """UPDATE signals SET settled=1, settled_win=?, settled_price=?,
+                       result_pnl=?, settled_at=? WHERE id=? AND (settled IS NULL OR settled=0)""",
+                (win, settle_price, result_pnl, at, sig_id))
+
+    def pending_settlements(self, limit: int = 300) -> list[dict]:
+        """未结算信号（供结算采集器扫描）。带 slug 的才有机会查 gamma 结算。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT id, slug, outcome, price, usdc, address, wallet_name, type, title
+                   FROM signals
+                   WHERE (settled IS NULL OR settled=0) AND slug IS NOT NULL AND slug<>''
+                   ORDER BY id ASC LIMIT ?""", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def settlement_stats(self, hours: float = 24) -> dict:
+        """汇总近 N 小时已推送信号的结算结果（用于回测/日报）。"""
+        since = time.time() - hours * 3600
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN settled_win=1 THEN 1 ELSE 0 END),0) wins,
+                          COALESCE(SUM(result_pnl),0) pnl
+                   FROM signals WHERE notified=1 AND settled=1
+                     AND created_at>=? AND settled_win IS NOT NULL""", (since,)).fetchone()
+        return {"n": row["n"] or 0, "wins": row["wins"] or 0,
+                "pnl": row["pnl"] or 0.0}
 
     # ---------------- cursors / meta ----------------
 
