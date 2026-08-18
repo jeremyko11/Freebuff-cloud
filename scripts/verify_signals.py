@@ -8,6 +8,7 @@
 """
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import time
@@ -16,6 +17,10 @@ import urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+_REPO = Path(__file__).resolve().parent.parent
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 GAMMA = "https://gamma-api.polymarket.com/markets"
 DB = "data/freebuff.db"
@@ -80,7 +85,21 @@ def main() -> int:
     ap.add_argument("--out", default="data/signal_verify.json")
     ap.add_argument("--report", action="store_true",
                     help="输出紧凑摘要(供日报追加)并重算 winrate_bands.json")
+    ap.add_argument("--db-only", action="store_true",
+                    help="只用 DB 已结算数据生成报表，跳过 gamma 回测(最快)")
     args = ap.parse_args()
+
+    # db-only 模式：跳过 gamma 主流程，直接由 _emit_report 用 DB 结算统计
+    if args.db_only:
+        store = None
+        try:
+            from src.store.db import Store
+            from src.config import get_config
+            store = Store(get_config().db_path)
+        except Exception:
+            store = None
+        _emit_report([], db_store=store)
+        return 0
 
     db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
@@ -211,13 +230,37 @@ def main() -> int:
     print(f"\n明细已保存: {args.out}")
 
     if args.report:
-        _emit_report(valid)
+        # 传入 Store 让 _emit_report 优先用 DB 已结算数据（免现查 gamma）
+        store = None
+        try:
+            from src.store.db import Store
+            from src.config import get_config
+            store = Store(get_config().db_path)
+        except Exception:
+            store = None
+        _emit_report(valid, db_store=store)
     return 0
 
 
-def _emit_report(valid: list) -> None:
-    """日报模式：输出紧凑摘要 + 重算 winrate_bands.json（供 filter 校准 EV）。"""
+def _emit_report(valid: list, db_store=None) -> None:
+    """日报模式：输出紧凑摘要 + 重算 winrate_bands.json（供 filter 校准 EV）。
+
+    db_store: 传入 Store 时优先从 DB 已结算数据(settled=1)直接统计，免现查 gamma。
+    """
     import time as _t
+
+    # 优先 DB 结算数据（更快、结果与 settle_collector 一致）
+    db_rows = None
+    if db_store is not None:
+        try:
+            db_rows = db_store._conn.execute(
+                """SELECT price AS buy_price, settled_win, result_pnl, market_category
+                   FROM signals
+                   WHERE settled=1 AND settled_win IS NOT NULL
+                     AND created_at >= ?""",
+                (time.time() - 240 * 3600,)).fetchall()
+        except Exception:
+            db_rows = None
 
     wins = [x for x in valid if (x["profit"] or 0) > 0]
     settled = [x for x in valid if x["status"] == "settled"]
@@ -228,30 +271,56 @@ def _emit_report(valid: list) -> None:
         return f"{100*a/b:.1f}%" if b else "-"
 
     print("\n======== 推送方向验证 (日报) ========")
-    print(f"✅ 验证 {n} 条 · 方向准确率 {pct(len(wins), n)} · "
-          f"已结算 {len(settled)} (胜率 {pct(sum(1 for x in settled if (x['profit'] or 0) > 0), len(settled))})")
-
-    # 按价格段胜率（顺便重算 winrate_bands.json）
-    bands = [("<0.1", 0, 0.1), ("0.1-0.25", 0.1, 0.25), ("0.25-0.5", 0.25, 0.5),
-             ("0.5-0.8", 0.5, 0.8), (">0.8", 0.8, 1.01)]
-    band_stats = {}
-    for name, lo, hi in bands:
-        xs = [x for x in valid if lo <= (x["buy_price"] or 0.5) < hi]
-        w = sum(1 for x in xs if (x["profit"] or 0) > 0)
-        wr = w / len(xs) if xs else None
-        band_stats[name] = {"n": len(xs), "win_rate": wr}
-        if wr is not None:
-            print(f"  {name:9s} n={len(xs):4d}  胜率 {pct(w, len(xs))}")
-
-    # 市场类目表现（Top3 差）
-    by_cat = defaultdict(list)
-    for x in valid:
-        by_cat[x["market_category"] or "未分类"].append(x)
-    cats = sorted(by_cat.items(), key=lambda kv: -len(kv[1]))[:4]
-    if cats:
-        print("  " + " | ".join(
-            f"{c}:{pct(sum(1 for x in xs if (x['profit'] or 0) > 0), len(xs))}"
-            for c, xs in cats))
+    if db_rows is not None and len(db_rows) >= 20:
+        # 用 DB 已结算数据统计
+        n = len(db_rows)
+        wins_n = sum(1 for r in db_rows if (r["settled_win"] or 0) == 1)
+        wr_all = wins_n / n if n else 0
+        print(f"✅ 依据DB结算 验证 {n} 条 · 方向准确率 {pct(wins_n, n)} · "
+              f"点数盈亏 {sum(r['result_pnl'] or 0 for r in db_rows):+.2f}")
+        # 按价格段
+        bands = [("<0.1", 0, 0.1), ("0.1-0.25", 0.1, 0.25), ("0.25-0.5", 0.25, 0.5),
+                 ("0.5-0.8", 0.5, 0.8), (">0.8", 0.8, 1.01)]
+        band_stats = {}
+        for name, lo, hi in bands:
+            xs = [r for r in db_rows if lo <= (r["buy_price"] or 0.5) < hi]
+            w = sum(1 for r in xs if (r["settled_win"] or 0) == 1)
+            wr = w / len(xs) if xs else None
+            band_stats[name] = {"n": len(xs), "win_rate": wr}
+            if wr is not None:
+                print(f"  {name:9s} n={len(xs):4d}  胜率 {pct(w, len(xs))}")
+        # 市场类目
+        by_cat = defaultdict(list)
+        for r in db_rows:
+            by_cat[r["market_category"] or "未分类"].append(r)
+        cats = sorted(by_cat.items(), key=lambda kv: -len(kv[1]))[:4]
+        if cats:
+            print("  " + " | ".join(
+                f"{c}:{pct(sum(1 for x in xs if (x['settled_win'] or 0) == 1), len(xs))}"
+                for c, xs in cats))
+    else:
+        print(f"✅ 验证 {n} 条 · 方向准确率 {pct(len(wins), n)} · "
+              f"已结算 {len(settled)} (胜率 {pct(sum(1 for x in settled if (x['profit'] or 0) > 0), len(settled))})")
+        # 按价格段胜率
+        bands = [("<0.1", 0, 0.1), ("0.1-0.25", 0.1, 0.25), ("0.25-0.5", 0.25, 0.5),
+                 ("0.5-0.8", 0.5, 0.8), (">0.8", 0.8, 1.01)]
+        band_stats = {}
+        for name, lo, hi in bands:
+            xs = [x for x in valid if lo <= (x["buy_price"] or 0.5) < hi]
+            w = sum(1 for x in xs if (x["profit"] or 0) > 0)
+            wr = w / len(xs) if xs else None
+            band_stats[name] = {"n": len(xs), "win_rate": wr}
+            if wr is not None:
+                print(f"  {name:9s} n={len(xs):4d}  胜率 {pct(w, len(xs))}")
+        # 市场类目表现（Top3 差）
+        by_cat = defaultdict(list)
+        for x in valid:
+            by_cat[x["market_category"] or "未分类"].append(x)
+        cats = sorted(by_cat.items(), key=lambda kv: -len(kv[1]))[:4]
+        if cats:
+            print("  " + " | ".join(
+                f"{c}:{pct(sum(1 for x in xs if (x['profit'] or 0) > 0), len(xs))}"
+                for c, xs in cats))
 
     # 重算 winrate_bands.json（有样本的档位写入，filter 用它校准）
     try:

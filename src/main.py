@@ -514,7 +514,7 @@ def cmd_daily() -> int:
             venv_py = "python"
         r = subprocess.run(
             [venv_py, "scripts/verify_signals.py", "--hours", "72",
-             "--report", "--out", "data/signal_verify.json"],
+             "--report", "--db-only", "--out", "data/signal_verify.json"],
             capture_output=True, text=True, timeout=300, cwd=str(Path(__file__).resolve().parent.parent))
         out = (r.stdout or "")
         if r.returncode == 0 and "推送方向验证" in out:
