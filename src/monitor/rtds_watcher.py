@@ -134,12 +134,12 @@ class RtdsWatcher:
                 "SELECT win_rate FROM wallets WHERE address=?", (s.address,)).fetchone()
             if row:
                 wr = row["win_rate"]
-            from src.smart.confidence import confidence, should_push, format_conf
-            conf = confidence(wr, s.price, s.usdc)
-            # 排行榜来源降低门槛到 0（这类钱包信号本身就是聪明钱动作）；其他保留 20
-            threshold = 0 if src_type == "排行榜" else 20
+            from src.smart.confidence import format_conf
+            # 把握度门槛：默认排行榜 0/非榜 20；/filter 设了 min_conf 则统一按它
+            from src.smart.filter import conf_threshold
+            threshold, conf = conf_threshold(s, self.store)
             if conf < threshold:
-                logger.info("低把握信号[跳过推送] %s %s %.0f分", s.wallet_name or s.address[:10], s.type, conf)
+                logger.info("低把握信号[跳过推送] %s %s %.0f分(门槛%.0f)", s.wallet_name or s.address[:10], s.type, conf, threshold)
                 return
         except Exception:
             pass

@@ -24,6 +24,9 @@ DEFAULT_FILTER = {
     "required_tags": [],
     "enabled_sources": {"排行榜": 1, "社区": 1, "小资金": 1, "手动": 1},
     "min_usdc": 200,
+    # 把握度门槛：0=不限制（排行榜仍直推/非排行榜≥20 的旧逻辑）；
+    # >0 时所有来源都要求把握分 >= min_conf
+    "min_conf": 0,
 }
 
 NEW = {}
@@ -131,6 +134,35 @@ def _resolve_source_type(s, store) -> str:
         return "排行榜"
 
 
+def conf_threshold(s, store, flt: dict | None = None) -> tuple[float, float]:
+    """返回 (门槛, 把握分)。
+
+    把握分 = confidence(wr, price, usdc)；门槛 = flt.min_conf>0 时取 min_conf，
+    否则按旧逻辑：排行榜 0 / 非排行榜 20。
+    """
+    if flt is None:
+        flt = store.get_filter("push_filter", dict(DEFAULT_FILTER))
+    min_conf = (flt or {}).get("min_conf") or 0
+    try:
+        from src.smart.confidence import confidence
+        wr = None
+        try:
+            row = store._conn.execute(
+                "SELECT win_rate FROM wallets WHERE address=?", (s.address,)).fetchone()
+            if row:
+                wr = row["win_rate"]
+        except Exception:
+            pass
+        conf = confidence(wr, s.price, s.usdc)
+    except Exception:
+        conf = 100.0
+    if min_conf > 0:
+        return (min_conf, conf)
+    src_type = _resolve_source_type(s, store)
+    threshold = 0 if src_type == "排行榜" else 20
+    return (threshold, conf)
+
+
 def should_push(s, store, flt: dict | None = None) -> tuple[bool, str]:
     """对 signal 判断是否应推送。返回 (是否推送, 原因/说明)。"""
     if flt is None:
@@ -181,6 +213,16 @@ def should_push(s, store, flt: dict | None = None) -> tuple[bool, str]:
             ev, _g, _n = ev_assess(s)
             if ev < float(ev_min):
                 return False, f"EV<{ev_min}({ev:+.2f})"
+        except Exception:
+            pass
+
+    # 7) 把握度门槛（可选：min_conf>0 时统一要求 >= min_conf）
+    min_conf = flt.get("min_conf") or 0
+    if min_conf > 0:
+        try:
+            _t, conf = conf_threshold(s, store, flt)
+            if conf < min_conf:
+                return False, f"把握{conf}分<{min_conf}"
         except Exception:
             pass
 

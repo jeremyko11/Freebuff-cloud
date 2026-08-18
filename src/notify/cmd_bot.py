@@ -74,6 +74,7 @@ def _main_keyboard():
         [{"text": "🎫 市场分类", "callback_data": "menu:markets"}],
         [{"text": "📡 来源开关", "callback_data": "menu:sources"}],
         [{"text": "💰 金额门槛", "callback_data": "menu:money"}],
+        [{"text": "🎯 把握度门槛", "callback_data": "menu:conf"}],
         [{"text": "👛 白名单钱包", "callback_data": "menu:wallets"}],
         [{"text": "🔁 重置默认", "callback_data": "menu:reset"}],
     ]
@@ -85,6 +86,21 @@ def _money_keyboard(flt):
     for m in opts:
         mark = "✓" if flt.get("min_usdc", 200) == m else ""
         rows.append([{"text": f"${m} {mark}", "callback_data": f"money:{m}"}])
+    rows.append([{"text": "⬅️ 返回主页", "callback_data": "menu:home"}])
+    return rows
+
+
+def _conf_keyboard(flt):
+    opts = [0, 20, 40, 60, 80]
+    rows = []
+    cur = flt.get("min_conf") or 0
+    rows.append([{"text": "💡 0=不限（默认）", "callback_data": "conf:none"}])
+    for c in opts:
+        if c == 0:
+            continue
+        label = {20: "≥20 低⚠️", 40: "≥40 中下", 60: "≥60 中", 80: "≥80 高🟢"}.get(c, f"≥{c}")
+        mark = "✓" if cur == c else ""
+        rows.append([{"text": f"{label} {mark}", "callback_data": f"conf:{c}"}])
     rows.append([{"text": "⬅️ 返回主页", "callback_data": "menu:home"}])
     return rows
 
@@ -105,6 +121,7 @@ def _filter_summary(flt) -> str:
         f"屏蔽市场: {', '.join(flt.get('blocked_markets') or []) or '—'}\n"
         f"只收市场: {', '.join(flt.get('allowed_markets') or []) or '全部'}\n"
         f"金额门槛: ${flt.get('min_usdc',200)}\n"
+        f"把握度: {'不限' if not (flt.get('min_conf') or 0) else '≥%d分' % flt['min_conf']}\n"
         f"白名单: {len(ws)} 个钱包\n"
         f"来源关闭: {', '.join(k for k,v in (flt.get('enabled_sources') or {}).items() if not v) or '全开'}"
     )
@@ -201,6 +218,11 @@ def _handle_callback(cfg, store, cb):
             kb = _money_keyboard(flt)
             _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
                   text=f"💰 金额门槛（当前 ${flt.get('min_usdc',200)}）", reply_markup={"inline_keyboard": kb})
+        elif menu == "conf":
+            kb = _conf_keyboard(flt)
+            cur = flt.get("min_conf") or 0
+            _send(cfg, "editMessageText", chat_id=chat, message_id=msg.get("message_id"),
+                  text=f"🎯 把握度门槛（当前 {'不限' if not cur else '≥%d分' % cur}）\n把握分来自钱包胜率+下注金额", reply_markup={"inline_keyboard": kb})
         elif menu == "wallets":
             kb = _wallet_keyboard(flt)
             ws = flt.get("allowed_wallets") or []
@@ -241,6 +263,21 @@ def _handle_callback(cfg, store, cb):
         _save_flt(store, flt)
         _send(cfg, "editMessageReplyMarkup", chat_id=chat, message_id=msg.get("message_id"),
               reply_markup={"inline_keyboard": _wallet_keyboard(flt)})
+    elif data.startswith("conf:"):
+        v = data.split(":")[1]
+        if v == "none":
+            flt["min_conf"] = 0
+            _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text="把握度不限")
+        else:
+            try:
+                c = int(v)
+                flt["min_conf"] = c
+                _send(cfg, "answerCallbackQuery", callback_query_id=cb_id, text=f"把握度 ≥{c} 分")
+            except Exception:
+                pass
+        _save_flt(store, flt)
+        _send(cfg, "editMessageReplyMarkup", chat_id=chat, message_id=msg.get("message_id"),
+              reply_markup={"inline_keyboard": _conf_keyboard(flt)})
     elif data.startswith("money:"):
         m = int(data.split(":")[1])
         flt["min_usdc"] = m
